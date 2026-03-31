@@ -71,7 +71,7 @@ func TestNotifyProxyConfigUpdateFailure(t *testing.T) {
 	withProxyNotificationSocket(t, "/tmp/nonexistent-notify-socket-12345.sock")
 
 	// Should exhaust retries and return without hanging.
-	// notifyProxyConfigUpdate has 3 retries with backoff starting at 100ms —
+	// notifyProxyConfigUpdate has 3 retries with backoff starting at 100ms -
 	// total worst-case ~700ms, acceptable in a unit test.
 	notifyProxyConfigUpdate()
 }
