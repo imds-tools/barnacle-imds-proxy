@@ -37,8 +37,8 @@ The proxy binds to the IMDS link-local addresses inside the VM and listens for H
 1. Looks up which container the request came from by source IP
 2. Forwards the request to the configured IMDS server URL
 3. Adds identity headers to the forwarded request:
-   - `X-Container-Id` — full container ID
-   - `X-Container-Name` — container name
+   - `X-Container-Id` - full container ID
+   - `X-Container-Name` - container name
    - One header per container label (`X-Label-<key>: <value>`)
 4. Streams the response back to the container
 
@@ -48,8 +48,8 @@ If the configured URL uses `localhost`, the proxy rewrites it to `host.docker.in
 
 Two bridge networks are created inside the VM:
 
-- **`.imds-0`** — carries IPv4 (`169.254.169.254`) and EC2 IPv6 (`fd00:ec2::254`) traffic
-- **`.imds-1`** — carries OpenStack IPv6 (`fd00:a9fe:a9fe::254`) traffic
+- **`.imds-0`** - carries IPv4 (`169.254.169.254`) and EC2 IPv6 (`fd00:ec2::254`) traffic
+- **`.imds-1`** - carries OpenStack IPv6 (`fd00:a9fe:a9fe::254`) traffic
 
 Both are attached to a container when it starts. The provider connectivity status shown in the UI reflects whether each network is connected.
 

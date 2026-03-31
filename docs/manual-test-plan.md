@@ -1,4 +1,4 @@
-# Barnacle IMDS Proxy — Manual Test Plan
+# Barnacle IMDS Proxy - Manual Test Plan
 
 Run on each platform: **macOS**, **Windows**, **Linux**.
 
@@ -33,7 +33,7 @@ Run on each platform: **macOS**, **Windows**, **Linux**.
 
 ---
 
-## 2. Containers tab — empty state
+## 2. Containers tab - empty state
 
 zsh/bash:
 ```shell
@@ -65,7 +65,7 @@ $ids = docker ps -q --filter label=imds-proxy.enabled=true; if ($ids) { docker r
 
 ---
 
-## 4. Containers tab — with labeled containers
+## 4. Containers tab - with labeled containers
 
 ```shell
 docker run -d --rm --name test-imds-1 --label imds-proxy.enabled=true alpine sleep 3600
@@ -111,7 +111,7 @@ Expected output contains `.imds-0` and `.imds-1`.
 
 ### Green (fully connected)
 
-Both networks attached — default state after the controller attaches them.
+Both networks attached - default state after the controller attaches them.
 
 | # | Action | Expected |
 |---|--------|----------|
@@ -205,7 +205,7 @@ docker stop imds-proxy
 
 | # | Action | Expected |
 |---|--------|----------|
-| 7.1 | Extension updates | Warning alert: "The IMDS proxy container has stopped — IMDS requests are not being proxied." with a "Start" button |
+| 7.1 | Extension updates | Warning alert: "The IMDS proxy container has stopped - IMDS requests are not being proxied." with a "Start" button |
 | 7.2 | Click "Start" | Alert disappears; proxy container returns to running |
 | 7.3 | Tab to the "Start" button in the alert | Button receives visible focus |
 | 7.4 | Press Enter on focused "Start" button | Same result as click |
@@ -255,7 +255,7 @@ docker stop imds-proxy-controller
 
 | # | Action | Expected |
 |---|--------|----------|
-| 8.1 | Containers tab | Warning alert appears: "Extension backend not responding — list may be outdated" with "Get help" button |
+| 8.1 | Containers tab | Warning alert appears: "Extension backend not responding - list may be outdated" with "Get help" button |
 | 8.2 | Settings tab | Warning alert: "Extension backend not responding. Your last saved settings are shown below, but changes cannot be saved." with "Get help" button |
 | 8.3 | Settings tab: edit the URL field | Field reverts to the previously saved value after a few seconds |
 | 8.4 | Tab to "Get help" button | Button receives visible focus; button is vertically centered in the alert |
@@ -334,7 +334,7 @@ docker exec imds-proxy-controller curl -sf --unix-socket /run/guest-services/bac
 |---|--------|----------|
 | 10.1 | Click "View documentation" in the header | GitHub repo opens in the system browser (not inside Docker Desktop) |
 | 10.2 | Tab to "View documentation", press Enter | Same result as click |
-| 10.3 | Tab to "View documentation", press Space | No navigation (correct — Space does not activate links, only Enter does) |
+| 10.3 | Tab to "View documentation", press Space | No navigation (correct - Space does not activate links, only Enter does) |
 
 ---
 
@@ -378,7 +378,7 @@ docker exec test-imds-1 wget -qO- --timeout=5 http://[fd00:ec2::254]/status
 # IPv6 OpenStack
 docker exec test-imds-1 wget -qO- --timeout=5 http://[fd00:a9fe:a9fe::254]/status
 
-# Unlabeled container — should fail
+# Unlabeled container - should fail
 docker run --rm alpine wget -qO- --timeout=3 http://169.254.169.254/status
 ```
 
