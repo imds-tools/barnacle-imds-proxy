@@ -8,13 +8,13 @@ Your local containers can't reach cloud providers' Instance Metadata Service. Th
 
 Cloud SDKs (AWS, GCP, Azure, etc.) check the Instance Metadata Service typically at `169.254.169.254` for credentials and other config when running in the cloud. Local containers can't reach that address, so you're stuck with one of these workarounds:
 
-| Approach | App code changes? | Secrets in Dockerfile/Compose? | Per-container identity? |
-|---|---|---|---|
-| Static env vars (`AWS_ACCESS_KEY_ID`, etc.) | None | Yes - env vars per container | Yes - but a static key per container |
-| Credential files mounted (`~/.aws`) | None | Yes - volume mount per container | Yes - via `AWS_PROFILE` (or similar), but static keys only (breaks SSO, `credentials_process`, etc.) |
-| aws-vault | None | No | No - manual exec wrapper, doesn't work well with Compose |
-| LocalStack[^1] | No (usually) | No | No |
-| **Barnacle + credential server** | **None** | **No** | **Yes - via container labels** |
+| Approach | App code changes? | Secrets in Dockerfile/Compose? | Per-container identity? | Multi-cloud? |
+|---|---|---|---|---|
+| Static env vars (`AWS_ACCESS_KEY_ID`, etc.) | None | Yes - env vars per container | Yes - but a static key per container | Messy - separate vars per provider |
+| Credential files mounted (`~/.aws`) | None | Yes - volume mount per container | Yes - via `AWS_PROFILE` (or similar), but static keys only (breaks SSO, `credentials_process`, etc.) | AWS only without extra tooling |
+| aws-vault | None | No | No - manual exec wrapper, doesn't work well with Compose | AWS only |
+| LocalStack[^1] | No (usually) | No | No | AWS only |
+| **Barnacle + credential server** | **None** | **No** | **Yes - via container labels** | **Yes - credential server routes by label** |
 
 [^1]: LocalStack solves a different problem - it mocks AWS services locally so you can test without hitting real APIs. It doesn't provide real credentials and requires your code to target a different endpoint. The others are all credential solutions, just with different tradeoffs.
 
