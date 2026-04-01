@@ -324,6 +324,108 @@ while ($listener.IsListening) {
 
 ---
 
+## Multi-cloud (AWS + Azure)
+
+Routes to the AWS or Azure handler based on a `CLOUD_PROVIDER` container label. Each container declares which provider it needs; one server handles both. Extend the pattern to add more providers.
+
+Label your container:
+
+```yaml
+labels:
+  - "imds-proxy.enabled=true"
+  - "CLOUD_PROVIDER=aws"          # or "azure"
+  - "AWS_PROFILE=my-profile"      # AWS only
+  - "AWS_DEFAULT_REGION=us-west-2" # AWS only, optional
+  - "AZURE_CLIENT_ID=<client-id>" # Azure only, optional
+```
+
+zsh/bash:
+
+```bash
+#!/usr/bin/env bash
+PORT=${1:-8080}
+while true; do
+  { read -r line
+    PATH_REQ=$(echo "$line" | awk '{print $2}')
+    while IFS= read -r h && [ "$h" != $'\r' ]; do
+      [[ "${h,,}" == x-container-labels:* ]] && LABELS="${h#*: }"
+    done
+    PROVIDER=$(echo "$LABELS" | jq -r '.CLOUD_PROVIDER // "aws"')
+    CTYPE="application/json"
+    STATUS="200 OK"
+    BODY=""
+    if [[ "$PATH_REQ" == */placement/region ]]; then
+      REGION=$(echo "$LABELS" | jq -r '.AWS_DEFAULT_REGION // empty')
+      BODY=${REGION:-${AWS_DEFAULT_REGION:-us-east-1}}
+      CTYPE="text/plain"
+    elif [[ "$PATH_REQ" == */iam/security-credentials* && "$PROVIDER" == "aws" ]]; then
+      PROFILE=$(echo "$LABELS" | jq -r '.AWS_PROFILE // "default"')
+      CREDS=$(AWS_PROFILE=$PROFILE aws sts get-session-token --query Credentials --output json)
+      BODY=$(echo "$CREDS" | jq -c '{Code:"Success",Type:"AWS-HMAC",
+        AccessKeyId:.AccessKeyId,SecretAccessKey:.SecretAccessKey,
+        Token:.SessionToken,Expiration:.Expiration}')
+    elif [[ "$PATH_REQ" == *metadata/identity/oauth2/token* && "$PROVIDER" == "azure" ]]; then
+      QUERY=$(echo "$PATH_REQ" | grep -o 'resource=[^&]*' | cut -d= -f2-)
+      RESOURCE=${QUERY:-https://management.azure.com/}
+      CLIENT_ID=$(echo "$LABELS" | jq -r '.AZURE_CLIENT_ID // empty')
+      TOKEN=$(az account get-access-token --resource "$RESOURCE" ${CLIENT_ID:+--client-id "$CLIENT_ID"} --output json)
+      BODY=$(echo "$TOKEN" | jq -c '{access_token:.accessToken,expires_in:3599,token_type:"Bearer"}')
+    else
+      STATUS="404 Not Found"
+    fi
+    printf "HTTP/1.1 $STATUS\r\nContent-Type: $CTYPE\r\nContent-Length: ${#BODY}\r\nConnection: close\r\n\r\n$BODY"
+  } | nc -l -p $PORT -q 1
+done
+```
+
+PowerShell:
+
+```powershell
+$port = 8080
+$listener = [System.Net.HttpListener]::new()
+$listener.Prefixes.Add("http://localhost:$port/")
+$listener.Prefixes.Add("http://host.docker.internal:$port/")
+$listener.Start()
+Write-Host "Multi-cloud IMDS server listening on port $port"
+while ($listener.IsListening) {
+    $ctx      = $listener.GetContext()
+    $labels   = $ctx.Request.Headers["x-container-labels"] | ConvertFrom-Json -AsHashtable
+    $provider = if ($labels?["CLOUD_PROVIDER"]) { $labels["CLOUD_PROVIDER"] } else { "aws" }
+    if ($ctx.Request.RawUrl -match "placement/region") {
+        $body = if ($labels?["AWS_DEFAULT_REGION"]) { $labels["AWS_DEFAULT_REGION"] }
+                elseif ($env:AWS_DEFAULT_REGION) { $env:AWS_DEFAULT_REGION }
+                else { "us-east-1" }
+        $ctx.Response.ContentType = "text/plain"
+    } elseif ($ctx.Request.RawUrl -match "iam/security-credentials" -and $provider -eq "aws") {
+        $profile = if ($labels?["AWS_PROFILE"]) { $labels["AWS_PROFILE"] } else { "default" }
+        $creds = aws sts get-session-token --profile $profile --query Credentials --output json | ConvertFrom-Json
+        $body  = @{ Code="Success"; Type="AWS-HMAC"; AccessKeyId=$creds.AccessKeyId
+                    SecretAccessKey=$creds.SecretAccessKey; Token=$creds.SessionToken
+                    Expiration=$creds.Expiration } | ConvertTo-Json -Compress
+        $ctx.Response.ContentType = "application/json"
+    } elseif ($ctx.Request.RawUrl -match "metadata/identity/oauth2/token" -and $provider -eq "azure") {
+        $resource = if ($ctx.Request.QueryString["resource"]) { $ctx.Request.QueryString["resource"] }
+                    else { "https://management.azure.com/" }
+        $clientId = $labels?["AZURE_CLIENT_ID"]
+        $args     = @("account", "get-access-token", "--resource", $resource, "--output", "json")
+        if ($clientId) { $args += "--client-id"; $args += $clientId }
+        $token = & az @args | ConvertFrom-Json
+        $body  = @{ access_token=$token.accessToken; expires_in=3599; token_type="Bearer" } | ConvertTo-Json -Compress
+        $ctx.Response.ContentType = "application/json"
+    } else {
+        $ctx.Response.StatusCode = 404
+        $ctx.Response.Close()
+        continue
+    }
+    $bytes = [Text.Encoding]::UTF8.GetBytes($body)
+    $ctx.Response.ContentLength64 = $bytes.Length
+    $ctx.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+    $ctx.Response.Close()
+}
+```
+
+---
+
 ## Other providers
 
 **DigitalOcean** - The DigitalOcean metadata service provides droplet info (hostname, region, tags) but does not serve credentials. Use the DigitalOcean API directly with a personal access token.
