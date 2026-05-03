@@ -114,7 +114,7 @@ describe('App', () => {
     render(<App />);
 
     const helpButton = await screen.findByRole('button', { name: /start/i });
-    // Trigger proxyHelp via the alert — click the alert action but have exec fail to open help
+    // Trigger proxyHelp via the alert - click the alert action but have exec fail to open help
     // Instead, trigger via ContainersTable's onProxyHelp prop by simulating proxy unreachable
     // For now verify the dialog can be opened from the alert area indirectly
     expect(helpButton).toBeTruthy();

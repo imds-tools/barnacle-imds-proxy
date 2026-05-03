@@ -1,4 +1,4 @@
-# Barnacle IMDS Proxy — Manual Test Plan
+# Barnacle IMDS Proxy - Manual Test Plan
 
 Run on each platform: **macOS**, **Windows**, **Linux**.
 
@@ -33,7 +33,7 @@ Run on each platform: **macOS**, **Windows**, **Linux**.
 
 ---
 
-## 2. Containers tab — empty state
+## 2. Containers tab - empty state
 
 zsh/bash:
 ```shell
@@ -65,7 +65,7 @@ $ids = docker ps -q --filter label=imds-proxy.enabled=true; if ($ids) { docker r
 
 ---
 
-## 4. Containers tab — with labeled containers
+## 4. Containers tab - with labeled containers
 
 ```shell
 docker run -d --rm --name test-imds-1 --label imds-proxy.enabled=true alpine sleep 3600
@@ -74,7 +74,7 @@ docker run -d --rm --name test-imds-2 --label imds-proxy.enabled=true alpine sle
 
 | # | Action | Expected |
 |---|--------|----------|
-| 4.1 | Containers appear in the table | Row shows container name, truncated ID, provider pill(s), and a collapse arrow |
+| 4.1 | Containers appear in the table | Row shows container name, truncated ID, and a collapse arrow |
 | 4.2 | | Item count at bottom-right updates |
 | 4.3 | Hover a row | Name copy icon and ID copy icon appear |
 | 4.4 | Click name copy icon | Snackbar "Copied container name to clipboard"; clipboard contains the name |
@@ -99,83 +99,17 @@ docker run -d --rm --name test-imds-2 --label imds-proxy.enabled=true alpine sle
 
 ---
 
-## 5. Provider pills
+## 5. Network attachment
 
-Confirm the container is attached to IMDS networks:
+Confirm a labeled container is attached to the IMDS networks the controller managed for the addresses configured in Settings:
 
 ```shell
 docker inspect test-imds-1 --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
 ```
 
-Expected output contains `.imds-0` and `.imds-1`.
+Expected output contains one `.imds-N` network per /24 IPv4 subnet and per /64 IPv6 subnet covering the configured IPs (typically `.imds-0` when only `169.254.169.254` is configured).
 
-### Green (fully connected)
-
-Both networks attached — default state after the controller attaches them.
-
-| # | Action | Expected |
-|---|--------|----------|
-| 5.1 | Observe pills | One pill per provider (AWS, GCP, OpenStack); sorted alphabetically |
-| 5.2 | Fully connected provider | Pill is green (outlined) |
-| 5.3 | Hover a pill | Tooltip shows provider name bold, then "✓ IPv4" and "✓ IPv6" |
-| 5.4 | Tab to a pill | Pill receives visible focus; tooltip appears |
-| 5.5 | Tab through all pills in a row | Each pill is individually focusable |
-
-### Yellow (partially connected)
-
-Disconnect `.imds-1` (OpenStack IPv6 network):
-
-zsh/bash:
-```shell
-IMDS1=$(docker network ls --format '{{.Name}}' | grep '\.imds-1')
-docker network disconnect "$IMDS1" test-imds-1
-```
-
-PowerShell:
-```powershell
-$IMDS1 = docker network ls --format '{{.Name}}' | Select-String '\.imds-1' | ForEach-Object { $_.Line.Trim() }
-docker network disconnect $IMDS1 test-imds-1
-```
-
-| # | Action | Expected |
-|---|--------|----------|
-| 5.6 | Observe OpenStack pill | Pill turns yellow/warning |
-| 5.7 | Tab to the yellow pill | Tooltip shows "✓ IPv4" and "✗ IPv6" |
-
-### Red (not connected)
-
-Disconnect `.imds-0` as well:
-
-zsh/bash:
-```shell
-IMDS0=$(docker network ls --format '{{.Name}}' | grep '\.imds-0')
-docker network disconnect "$IMDS0" test-imds-1
-```
-
-PowerShell:
-```powershell
-$IMDS0 = docker network ls --format '{{.Name}}' | Select-String '\.imds-0' | ForEach-Object { $_.Line.Trim() }
-docker network disconnect $IMDS0 test-imds-1
-```
-
-| # | Action | Expected |
-|---|--------|----------|
-| 5.8 | Observe all pills | All pills turn red/error |
-| 5.9 | Tab to a red pill | Tooltip shows "✗ IPv4" and "✗ IPv6" |
-
-Reconnect after testing:
-
-zsh/bash:
-```shell
-docker network connect "$IMDS0" test-imds-1
-docker network connect "$IMDS1" test-imds-1
-```
-
-PowerShell:
-```powershell
-docker network connect $IMDS0 test-imds-1
-docker network connect $IMDS1 test-imds-1
-```
+> Per-container connectivity status (provider pills) is not currently rendered — see TODO.md "Container list UI redesign".
 
 ---
 
@@ -205,7 +139,7 @@ docker stop imds-proxy
 
 | # | Action | Expected |
 |---|--------|----------|
-| 7.1 | Extension updates | Warning alert: "The IMDS proxy container has stopped — IMDS requests are not being proxied." with a "Start" button |
+| 7.1 | Extension updates | Warning alert: "The IMDS proxy container has stopped - IMDS requests are not being proxied." with a "Start" button |
 | 7.2 | Click "Start" | Alert disappears; proxy container returns to running |
 | 7.3 | Tab to the "Start" button in the alert | Button receives visible focus |
 | 7.4 | Press Enter on focused "Start" button | Same result as click |
@@ -255,7 +189,7 @@ docker stop imds-proxy-controller
 
 | # | Action | Expected |
 |---|--------|----------|
-| 8.1 | Containers tab | Warning alert appears: "Extension backend not responding — list may be outdated" with "Get help" button |
+| 8.1 | Containers tab | Warning alert appears: "Extension backend not responding - list may be outdated" with "Get help" button |
 | 8.2 | Settings tab | Warning alert: "Extension backend not responding. Your last saved settings are shown below, but changes cannot be saved." with "Get help" button |
 | 8.3 | Settings tab: edit the URL field | Field reverts to the previously saved value after a few seconds |
 | 8.4 | Tab to "Get help" button | Button receives visible focus; button is vertically centered in the alert |
@@ -334,7 +268,7 @@ docker exec imds-proxy-controller curl -sf --unix-socket /run/guest-services/bac
 |---|--------|----------|
 | 10.1 | Click "View documentation" in the header | GitHub repo opens in the system browser (not inside Docker Desktop) |
 | 10.2 | Tab to "View documentation", press Enter | Same result as click |
-| 10.3 | Tab to "View documentation", press Space | No navigation (correct — Space does not activate links, only Enter does) |
+| 10.3 | Tab to "View documentation", press Space | No navigation (correct - Space does not activate links, only Enter does) |
 
 ---
 
@@ -378,7 +312,7 @@ docker exec test-imds-1 wget -qO- --timeout=5 http://[fd00:ec2::254]/status
 # IPv6 OpenStack
 docker exec test-imds-1 wget -qO- --timeout=5 http://[fd00:a9fe:a9fe::254]/status
 
-# Unlabeled container — should fail
+# Unlabeled container - should fail
 docker run --rm alpine wget -qO- --timeout=3 http://169.254.169.254/status
 ```
 

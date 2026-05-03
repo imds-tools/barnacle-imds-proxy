@@ -16,8 +16,8 @@
 # End-to-end tests for barnacle-imds-proxy.
 #
 # BACKEND controls which upstream server is used:
-#   BACKEND=test-server  (default) — starts the built-in Go test server on TEST_SERVER_PORT
-#   BACKEND=imds-server             — expects imds-server already running; skips echo-header tests
+#   BACKEND=test-server  (default) - starts the built-in Go test server on TEST_SERVER_PORT
+#   BACKEND=imds-server             - expects imds-server already running; skips echo-header tests
 #
 # The extension must be configured to point at the appropriate backend URL before running.
 
@@ -98,7 +98,7 @@ teardown_file() {
     echo "$networks" | grep -q '\.imds-0'
 }
 
-# --- reachability tests (use /status — present on both backends) ---
+# --- reachability tests (use /status - present on both backends) ---
 
 @test "IPv4 169.254.169.254 is reachable" {
     docker exec "$CONTAINER_NAME" wget -qO- --timeout=5 http://169.254.169.254/status

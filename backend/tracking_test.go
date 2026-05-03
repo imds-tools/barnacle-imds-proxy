@@ -1278,7 +1278,7 @@ func TestRefreshContainerNetworksUntracked(t *testing.T) {
 		},
 	}
 
-	// Container is not in trackedContainers — should return nil without panic.
+	// Container is not in trackedContainers - should return nil without panic.
 	if err := refreshContainerNetworks(context.Background(), cli, "untracked999"); err != nil {
 		t.Fatalf("want no error for untracked container, got %v", err)
 	}

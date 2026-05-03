@@ -335,7 +335,7 @@ export function ContainersTable({
             )
           }
         >
-          Extension backend not responding — list may be outdated.
+          Extension backend not responding - list may be outdated.
         </Alert>
       )}
       <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
