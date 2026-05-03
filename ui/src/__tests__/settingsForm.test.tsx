@@ -184,7 +184,10 @@ describe('SettingsForm', () => {
       await Promise.resolve(); // Flush microtasks
     });
 
-    expect(client.extension.vm.service.post).toHaveBeenCalledWith('/settings', { url: NEW_URL });
+    expect(client.extension.vm.service.post).toHaveBeenCalledWith('/settings', {
+      url: NEW_URL,
+      customIPs: expect.any(Array),
+    });
     expect(localStorage.getItem('url')).toBe(NEW_URL);
     expect(showSnackbar).toHaveBeenCalledWith('Settings saved', 'success');
     expect((button as HTMLButtonElement).disabled).toBe(true);
@@ -214,7 +217,7 @@ describe('SettingsForm', () => {
 
     // Wait for settings to load
     await waitFor(() => {
-      expect(screen.getByRole('textbox')).toBeDefined();
+      expect(screen.getByLabelText(/IMDS server URL/i)).toBeDefined();
     });
   });
 
@@ -228,9 +231,9 @@ describe('SettingsForm', () => {
 
     render(<SettingsForm ddClient={client as any} service={service} showSnackbar={showSnackbar} />);
 
-    await waitFor(() => expect(screen.getByRole('textbox')).toBeDefined());
+    await waitFor(() => expect(screen.getByLabelText(/IMDS server URL/i)).toBeDefined());
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByLabelText(/IMDS server URL/i);
     fireEvent.change(input, { target: { value: NEW_URL_VALUE } });
 
     const button = screen.getByRole('button', { name: /save settings/i });
@@ -251,18 +254,60 @@ describe('SettingsForm', () => {
     render(<SettingsForm ddClient={null} service={service} showSnackbar={showSnackbar} />);
 
     // Component renders, but should not call service methods without client
-    expect(screen.getByRole('textbox')).toBeDefined();
+    expect(screen.getByLabelText(/IMDS server URL/i)).toBeDefined();
     expect(service.getSettings).not.toHaveBeenCalled();
 
     // Attempting to save should show error
     const button = screen.getByRole('button', { name: /save settings/i });
-    const input = screen.getByRole('textbox');
+    const input = screen.getByLabelText(/IMDS server URL/i);
     fireEvent.change(input, { target: { value: TEST_URL } });
     fireEvent.click(button);
 
     await waitFor(() => {
       expect(showSnackbar).toHaveBeenCalledWith('Docker Desktop client unavailable', 'error');
     });
+  });
+
+  it('adds a valid IPv4 address to the list', async () => {
+    const service = createMockService({
+      getSettings: vi.fn().mockResolvedValue({ url: SETTINGS_URL }),
+    });
+    render(<SettingsForm ddClient={createMockDockerDesktopClient() as any} service={service} showSnackbar={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByLabelText(/IP address/i)).toBeDefined());
+
+    fireEvent.change(screen.getByLabelText(/IP address/i), { target: { value: '169.254.169.254' } });
+    fireEvent.click(screen.getByRole('button', { name: '' })); // AddIcon button
+
+    await waitFor(() => expect(screen.getByText('169.254.169.254')).toBeTruthy());
+  });
+
+  it('rejects an invalid IP address', async () => {
+    const service = createMockService({
+      getSettings: vi.fn().mockResolvedValue({ url: SETTINGS_URL }),
+    });
+    render(<SettingsForm ddClient={createMockDockerDesktopClient() as any} service={service} showSnackbar={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByLabelText(/IP address/i)).toBeDefined());
+
+    fireEvent.change(screen.getByLabelText(/IP address/i), { target: { value: 'not-an-ip' } });
+    fireEvent.click(screen.getByRole('button', { name: '' }));
+
+    await waitFor(() => expect(screen.getByText('Enter a valid IPv4 or IPv6 address')).toBeTruthy());
+  });
+
+  it('rejects a duplicate IP address', async () => {
+    const service = createMockService({
+      getSettings: vi.fn().mockResolvedValue({ url: SETTINGS_URL, customIPs: ['169.254.169.254'] }),
+    });
+    render(<SettingsForm ddClient={createMockDockerDesktopClient() as any} service={service} showSnackbar={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByLabelText(/IP address/i)).toBeDefined());
+
+    fireEvent.change(screen.getByLabelText(/IP address/i), { target: { value: '169.254.169.254' } });
+    fireEvent.click(screen.getByRole('button', { name: '' }));
+
+    await waitFor(() => expect(screen.getByText('Address already added')).toBeTruthy());
   });
 
   it('handles unexpected settings response format', async () => {

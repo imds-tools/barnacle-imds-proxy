@@ -28,13 +28,13 @@ IMDS_SERVER_PORT="${IMDS_SERVER_PORT:-3333}"
 TEST_SERVER_PID=""
 CONTROLLER_SOCKET="/run/guest-services/backend.sock"
 
-# Update the extension backend URL via the controller's settings API
-set_backend_url() {
+# Update the extension settings via the controller's settings API
+set_settings() {
     local url="$1"
     docker exec imds-proxy-controller \
         curl -sf --unix-socket "$CONTROLLER_SOCKET" \
         -X POST -H 'Content-Type: application/json' \
-        -d "{\"url\":\"$url\"}" \
+        -d "{\"url\":\"$url\",\"customIPs\":[\"169.254.169.254\",\"fd00:ec2::254\"]}" \
         http://localhost/settings >/dev/null
 }
 
@@ -59,9 +59,9 @@ setup_file() {
             return 1
         fi
 
-        set_backend_url "http://localhost:$TEST_SERVER_PORT"
+        set_settings "http://localhost:$TEST_SERVER_PORT"
     else
-        set_backend_url "http://localhost:$IMDS_SERVER_PORT"
+        set_settings "http://localhost:$IMDS_SERVER_PORT"
     fi
 
     # Start a labeled container
@@ -93,14 +93,9 @@ teardown_file() {
     docker network ls --format '{{.Name}}' | grep -q '\.imds-0'
 }
 
-@test ".imds-1 network exists" {
-    docker network ls --format '{{.Name}}' | grep -q '\.imds-1'
-}
-
-@test "container is attached to IMDS networks" {
+@test "container is attached to .imds-0" {
     networks=$(docker inspect "$CONTAINER_NAME" --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}')
     echo "$networks" | grep -q '\.imds-0'
-    echo "$networks" | grep -q '\.imds-1'
 }
 
 # --- reachability tests (use /status — present on both backends) ---
@@ -113,9 +108,6 @@ teardown_file() {
     docker exec "$CONTAINER_NAME" wget -qO- --timeout=5 "http://[fd00:ec2::254]/status"
 }
 
-@test "IPv6 fd00:a9fe:a9fe::254 is reachable" {
-    docker exec "$CONTAINER_NAME" wget -qO- --timeout=5 "http://[fd00:a9fe:a9fe::254]/status"
-}
 
 # --- proxy header tests (test-server only) ---
 

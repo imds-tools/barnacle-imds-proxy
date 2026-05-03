@@ -36,6 +36,7 @@ export interface ContainerInfo {
  */
 export interface SettingsResponse {
   url?: string;
+  customIPs?: string[];
 }
 
 /**
