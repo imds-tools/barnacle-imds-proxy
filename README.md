@@ -28,7 +28,10 @@ Search for "Barnacle" in the Docker Desktop Extensions Marketplace.
 
 1. Start a credential server. See [docs/recipes.md](docs/recipes.md) for copy-paste scripts for different cloud provider recipes.
 
-2. Open the extension and go to the **Settings** tab. Enter your server URL. You can use `localhost` - the proxy rewrites it to `host.docker.internal` for you.
+2. Open the extension and go to the **Settings** tab.
+
+   - Enter your server URL. You can use `localhost` - the proxy rewrites it to `host.docker.internal` for you.
+   - Add the IMDS addresses you want to intercept (e.g. `169.254.169.254` for AWS/GCP, `fd00:ec2::254` for AWS IPv6). Any IPv4 or IPv6 address works; see [Common addresses](#common-addresses) below.
 
 3. Add the label `imds-proxy.enabled=true` to any container:
 
@@ -46,9 +49,11 @@ Search for "Barnacle" in the Docker Desktop Extensions Marketplace.
    docker run --label imds-proxy.enabled=true my-app:latest
    ```
 
-4. Done. The extension connects labeled containers to the IMDS proxy automatically. The Containers tab shows which containers are active and their network connectivity status.
+4. Done. The extension connects labeled containers to the configured IMDS addresses automatically. The Containers tab shows which containers are active and their network connectivity status.
 
-## Supported addresses
+## Common addresses
+
+Any IPv4 or IPv6 address you add in Settings is intercepted. These are the well-known IMDS addresses for major providers:
 
 | Provider  | Address               | Protocol |
 |-----------|-----------------------|----------|
@@ -60,8 +65,8 @@ Search for "Barnacle" in the Docker Desktop Extensions Marketplace.
 
 Two services run inside the Docker Desktop VM:
 
-- The **controller** watches Docker events. When a labeled container starts, it briefly pauses it, connects it to the IMDS networks, then unpauses it - ensuring the network is ready before the container's process starts.
-- The **proxy** binds to the IMDS addresses and forwards requests to your server, adding `X-Container-Id`, `X-Container-Name`, and container label headers so your server knows which container made the request.
+- The **controller** watches Docker events and manages a Docker bridge network for each /24 (IPv4) or /64 (IPv6) subnet covering the addresses you configured. When a labeled container starts, it briefly pauses it, connects it to those networks, then unpauses it - ensuring the network is ready before the container's process starts.
+- The **proxy** binds to the configured IMDS addresses and forwards requests to your server, adding `X-Container-Id`, `X-Container-Name`, and container label headers so your server knows which container made the request.
 
 For the full technical description, see [docs/architecture.md](docs/architecture.md).
 
