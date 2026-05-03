@@ -46,22 +46,19 @@ If the configured URL uses `localhost`, the proxy rewrites it to `host.docker.in
 
 ## Networks
 
-Two bridge networks are created inside the VM:
+Bridge networks are derived from the IP addresses configured in Settings. The controller groups configured IPs by /24 (IPv4) or /64 (IPv6) subnet and creates one bridge network per subnet pair (`.imds-0`, `.imds-1`, ...). Each network has the proxy attached at the configured IP, so any container connected to that network reaches the proxy when it hits the IMDS address.
 
-- **`.imds-0`** - carries IPv4 (`169.254.169.254`) and EC2 IPv6 (`fd00:ec2::254`) traffic
-- **`.imds-1`** - carries OpenStack IPv6 (`fd00:a9fe:a9fe::254`) traffic
+The controller reconciles networks on backend startup and after every Settings save:
 
-Both are attached to a container when it starts. The provider connectivity status shown in the UI reflects whether each network is connected.
+- Networks whose subnets no longer match the desired config are removed and recreated
+- Networks no longer needed are removed
+- Labeled containers are reconnected to the current set of networks
 
-| Provider  | Network  | IPv4             | IPv6                  |
-|-----------|----------|------------------|-----------------------|
-| AWS       | `.imds-0` | 169.254.169.254  | fd00:ec2::254         |
-| GCP       | `.imds-0` | 169.254.169.254  | fd00:ec2::254         |
-| OpenStack | `.imds-1` |                  | fd00:a9fe:a9fe::254   |
+If the user configures an unusual address (e.g. `100.100.100.200` for Alibaba Cloud), a corresponding bridge network is created for its subnet — no code change needed.
 
 ## Settings
 
-Settings (the IMDS server URL) are stored in the backend and served via a Unix socket at `/run/guest-services/backend.sock`. The UI reads settings on load and polls for changes every 5 seconds. If the backend is unreachable, the UI falls back to `localStorage` for read-only display.
+Settings (the IMDS server URL and the list of IPs to intercept) are stored in the backend at `/data/settings.json` and served via a Unix socket at `/run/guest-services/backend.sock`. The UI reads settings on load and polls for changes every 5 seconds. If the backend is unreachable, the UI falls back to `localStorage` for read-only display.
 
 ## UI
 
