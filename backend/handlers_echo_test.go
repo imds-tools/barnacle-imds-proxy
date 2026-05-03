@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -25,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
 	"github.com/labstack/echo/v4"
 )
 
@@ -33,6 +35,10 @@ func withNoOpNotify(t *testing.T) {
 	old := notifyProxyConfigUpdateFn
 	notifyProxyConfigUpdateFn = func() {}
 	t.Cleanup(func() { notifyProxyConfigUpdateFn = old })
+
+	oldReconcile := reconcileNetworksFn
+	reconcileNetworksFn = func(_ context.Context, _ DockerClient, _ []NetworkConfig) error { return nil }
+	t.Cleanup(func() { reconcileNetworksFn = oldReconcile })
 }
 
 func withTempSettingsPath(t *testing.T) {
@@ -158,6 +164,202 @@ func TestSaveSettingsInvalidJSON(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("want status 400, got %d", rec.Code)
+	}
+}
+
+func TestSaveSettingsWithCustomIPs(t *testing.T) {
+	withTempSettingsPath(t)
+	withSettings(t, Settings{})
+	withNoOpNotify(t)
+
+	e := echo.New()
+	body := strings.NewReader(`{"url":"http://example.com","customIPs":["169.254.169.254","fd00:ec2::254"]}`)
+	req := httptest.NewRequest(http.MethodPost, "/settings", body)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := saveSettings(c); err != nil {
+		t.Fatalf("saveSettings() returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want status 200, got %d", rec.Code)
+	}
+
+	settingsMutex.RLock()
+	nets := settings.NetworkConfig
+	settingsMutex.RUnlock()
+
+	if len(nets) != 1 {
+		t.Fatalf("want 1 network config, got %d", len(nets))
+	}
+	if nets[0].ProxyIPv4 != "169.254.169.254" {
+		t.Errorf("want ProxyIPv4 169.254.169.254, got %q", nets[0].ProxyIPv4)
+	}
+	if nets[0].ProxyIPv6 != "fd00:ec2::254" {
+		t.Errorf("want ProxyIPv6 fd00:ec2::254, got %q", nets[0].ProxyIPv6)
+	}
+}
+
+func TestComputeNetworkConfigEmpty(t *testing.T) {
+	if nets := computeNetworkConfig([]string{}); len(nets) != 0 {
+		t.Fatalf("want 0 networks, got %d", len(nets))
+	}
+}
+
+func TestComputeNetworkConfigIPv4Only(t *testing.T) {
+	nets := computeNetworkConfig([]string{"169.254.169.254"})
+	if len(nets) != 1 {
+		t.Fatalf("want 1 network, got %d", len(nets))
+	}
+	if nets[0].ProxyIPv4 != "169.254.169.254" {
+		t.Errorf("want ProxyIPv4 169.254.169.254, got %q", nets[0].ProxyIPv4)
+	}
+	if nets[0].IPv6Subnet != "" {
+		t.Errorf("want no IPv6 subnet, got %q", nets[0].IPv6Subnet)
+	}
+}
+
+func TestComputeNetworkConfigIPv6Only(t *testing.T) {
+	nets := computeNetworkConfig([]string{"fd00:ec2::254"})
+	if len(nets) != 1 {
+		t.Fatalf("want 1 network, got %d", len(nets))
+	}
+	if nets[0].ProxyIPv6 != "fd00:ec2::254" {
+		t.Errorf("want ProxyIPv6 fd00:ec2::254, got %q", nets[0].ProxyIPv6)
+	}
+	if nets[0].IPv4Subnet != "" {
+		t.Errorf("want no IPv4 subnet, got %q", nets[0].IPv4Subnet)
+	}
+}
+
+func TestComputeNetworkConfigInvalidIPSkipped(t *testing.T) {
+	nets := computeNetworkConfig([]string{"not-an-ip", "169.254.169.254"})
+	if len(nets) != 1 {
+		t.Fatalf("want 1 network (invalid IP skipped), got %d", len(nets))
+	}
+}
+
+func TestComputeNetworkConfigDeduplicatesSubnet(t *testing.T) {
+	nets := computeNetworkConfig([]string{"169.254.169.254", "169.254.169.1"})
+	if len(nets) != 1 {
+		t.Fatalf("want 1 network for same /24, got %d", len(nets))
+	}
+}
+
+func TestReconcileNetworksCreatesNew(t *testing.T) {
+	managedNetworksMutex.Lock()
+	managedNetworks = nil
+	managedNetworksMutex.Unlock()
+	t.Cleanup(func() {
+		managedNetworksMutex.Lock()
+		managedNetworks = nil
+		managedNetworksMutex.Unlock()
+	})
+
+	cli := &fakeDockerClient{networkList: []network.Summary{}}
+	desired := []NetworkConfig{{Name: ".imds-0", IPv4Subnet: "169.254.169.0/24", ProxyIPv4: "169.254.169.254"}}
+
+	if err := reconcileNetworks(context.Background(), cli, desired); err != nil {
+		t.Fatalf("reconcileNetworks() error: %v", err)
+	}
+	if len(cli.networkCreateCalls) != 1 || cli.networkCreateCalls[0] != ".imds-0" {
+		t.Errorf("want networkCreate .imds-0, got %v", cli.networkCreateCalls)
+	}
+}
+
+func TestReconcileNetworksRemovesUnneeded(t *testing.T) {
+	managedNetworksMutex.Lock()
+	managedNetworks = nil
+	managedNetworksMutex.Unlock()
+	t.Cleanup(func() {
+		managedNetworksMutex.Lock()
+		managedNetworks = nil
+		managedNetworksMutex.Unlock()
+	})
+
+	cli := &fakeDockerClient{
+		networkList: []network.Summary{
+			{ID: "net-abc", Name: ".imds-0", Labels: map[string]string{imdsManagedLabel: "true"}},
+		},
+	}
+
+	if err := reconcileNetworks(context.Background(), cli, []NetworkConfig{}); err != nil {
+		t.Fatalf("reconcileNetworks() error: %v", err)
+	}
+	if len(cli.networkRemoveCalls) != 1 || cli.networkRemoveCalls[0] != "net-abc" {
+		t.Errorf("want networkRemove net-abc, got %v", cli.networkRemoveCalls)
+	}
+}
+
+func TestReconcileNetworksRemovesOnSubnetChange(t *testing.T) {
+	managedNetworksMutex.Lock()
+	managedNetworks = nil
+	managedNetworksMutex.Unlock()
+	t.Cleanup(func() {
+		managedNetworksMutex.Lock()
+		managedNetworks = nil
+		managedNetworksMutex.Unlock()
+	})
+
+	cli := &fakeDockerClient{
+		networkList: []network.Summary{
+			{
+				ID:     "net-old",
+				Name:   ".imds-0",
+				Labels: map[string]string{imdsManagedLabel: "true"},
+				IPAM: network.IPAM{
+					Config: []network.IPAMConfig{{Subnet: "169.254.169.0/24"}},
+				},
+			},
+		},
+	}
+	desired := []NetworkConfig{
+		{Name: ".imds-0", IPv4Subnet: "10.0.0.0/24", ProxyIPv4: "10.0.0.1"},
+	}
+
+	if err := reconcileNetworks(context.Background(), cli, desired); err != nil {
+		t.Fatalf("reconcileNetworks() error: %v", err)
+	}
+	if len(cli.networkRemoveCalls) != 1 || cli.networkRemoveCalls[0] != "net-old" {
+		t.Errorf("want networkRemove net-old, got %v", cli.networkRemoveCalls)
+	}
+	if len(cli.networkCreateCalls) != 1 || cli.networkCreateCalls[0] != ".imds-0" {
+		t.Errorf("want networkCreate .imds-0, got %v", cli.networkCreateCalls)
+	}
+}
+
+func TestReconcileNetworksListError(t *testing.T) {
+	cli := &fakeDockerClient{networkListErr: errors.New("docker unavailable")}
+	if err := reconcileNetworks(context.Background(), cli, nil); err == nil {
+		t.Fatal("want error when NetworkList fails, got nil")
+	}
+}
+
+func TestDisconnectAllFromNetwork(t *testing.T) {
+	cli := &fakeDockerClient{
+		containerList: []container.Summary{
+			{
+				ID: "ctr1",
+				NetworkSettings: &container.NetworkSettingsSummary{
+					Networks: map[string]*network.EndpointSettings{".imds-0": {}},
+				},
+			},
+		},
+	}
+
+	if err := disconnectAllFromNetwork(context.Background(), cli, ".imds-0"); err != nil {
+		t.Fatalf("disconnectAllFromNetwork() error: %v", err)
+	}
+	if len(cli.networkDisconnectCalls) != 1 || cli.networkDisconnectCalls[0] != ".imds-0:ctr1" {
+		t.Errorf("want disconnect .imds-0:ctr1, got %v", cli.networkDisconnectCalls)
+	}
+}
+
+func TestDisconnectAllFromNetworkListError(t *testing.T) {
+	cli := &fakeDockerClient{containerListErr: errors.New("list failed")}
+	if err := disconnectAllFromNetwork(context.Background(), cli, ".imds-0"); err == nil {
+		t.Fatal("want error when ContainerList fails, got nil")
 	}
 }
 

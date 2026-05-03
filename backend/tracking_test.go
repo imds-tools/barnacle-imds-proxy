@@ -30,17 +30,22 @@ import (
 )
 
 type fakeDockerClient struct {
-	inspectCalls        int
-	inspectSequence     []container.InspectResponse
-	inspectErr          error
-	networkConnectCalls []string
-	pauseCalls          int
-	unpauseCalls        int
-	closeCalls          int
-	containerList       []container.Summary
-	containerListErr    error
-	networkList         []network.Summary
-	networkListErr      error
+	inspectCalls            int
+	inspectSequence         []container.InspectResponse
+	inspectErr              error
+	networkConnectCalls     []string
+	networkCreateCalls      []string
+	networkDisconnectCalls  []string
+	networkRemoveCalls      []string
+	pauseCalls              int
+	unpauseCalls            int
+	closeCalls              int
+	containerList           []container.Summary
+	containerListErr        error
+	networkList             []network.Summary
+	networkListErr          error
+	networkCreateErr        error
+	networkRemoveErr        error
 }
 
 func (f *fakeDockerClient) ContainerInspect(_ context.Context, _ string) (container.InspectResponse, error) {
@@ -68,6 +73,27 @@ func (f *fakeDockerClient) Events(_ context.Context, _ events.ListOptions) (<-ch
 
 func (f *fakeDockerClient) NetworkConnect(_ context.Context, networkID, _ string, _ *network.EndpointSettings) error {
 	f.networkConnectCalls = append(f.networkConnectCalls, networkID)
+	return nil
+}
+
+func (f *fakeDockerClient) NetworkCreate(_ context.Context, name string, _ network.CreateOptions) (network.CreateResponse, error) {
+	f.networkCreateCalls = append(f.networkCreateCalls, name)
+	if f.networkCreateErr != nil {
+		return network.CreateResponse{}, f.networkCreateErr
+	}
+	return network.CreateResponse{ID: "net-" + name}, nil
+}
+
+func (f *fakeDockerClient) NetworkDisconnect(_ context.Context, networkID, containerID string, _ bool) error {
+	f.networkDisconnectCalls = append(f.networkDisconnectCalls, networkID+":"+containerID)
+	return nil
+}
+
+func (f *fakeDockerClient) NetworkRemove(_ context.Context, networkID string) error {
+	f.networkRemoveCalls = append(f.networkRemoveCalls, networkID)
+	if f.networkRemoveErr != nil {
+		return f.networkRemoveErr
+	}
 	return nil
 }
 
