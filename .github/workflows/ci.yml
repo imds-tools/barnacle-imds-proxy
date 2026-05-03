@@ -59,7 +59,7 @@ jobs:
           # Dependabot (gomod/backend) will open a PR when Docker ships a fix - remove these then
           output=$(govulncheck -C backend ./... 2>&1) || true
           echo "$output"
-          unsuppressed=$(echo "$output" | grep -oE "GO-[0-9]+-[0-9]+" | sort -u | grep -vE "^(GO-2026-4887|GO-2026-4883)$")
+          unsuppressed=$(echo "$output" | grep -oE "GO-[0-9]+-[0-9]+" | sort -u | grep -vE "^(GO-2026-4887|GO-2026-4883)$") || true
           if [ -n "$unsuppressed" ]; then
             echo "Unsuppressed vulnerabilities: $unsuppressed"
             exit 1
@@ -70,7 +70,7 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           output=$(govulncheck -C proxy ./... 2>&1) || true
           echo "$output"
-          unsuppressed=$(echo "$output" | grep -oE "GO-[0-9]+-[0-9]+" | sort -u | grep -vE "^(GO-2026-4887|GO-2026-4883)$")
+          unsuppressed=$(echo "$output" | grep -oE "GO-[0-9]+-[0-9]+" | sort -u | grep -vE "^(GO-2026-4887|GO-2026-4883)$") || true
           if [ -n "$unsuppressed" ]; then
             echo "Unsuppressed vulnerabilities: $unsuppressed"
             exit 1
