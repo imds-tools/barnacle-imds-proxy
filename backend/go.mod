@@ -1,6 +1,6 @@
 module docker-desktop-imds-proxy
 
-go 1.24.3
+go 1.25
 
 require (
 	github.com/containerd/errdefs v1.0.0
