@@ -20,12 +20,12 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -46,7 +46,6 @@ var logger = logrus.New()
 const (
 	proxySocketPath    = "/var/run/imds-proxy/backend.sock"
 	imdsManagedLabel   = "imds-proxy.managed"
-	imdsProvidersLabel = "imds-proxy.providers"
 	proxyContainerName = "imds-proxy"
 )
 
@@ -63,7 +62,80 @@ const (
 var proxyNotificationSocketPath = "/var/run/imds-proxy/notifications.sock"
 
 type Settings struct {
-	URL string `json:"url"`
+	URL              string          `json:"url"`
+	CustomIPs        []string        `json:"customIPs,omitempty"`
+	NetworkConfig    []NetworkConfig `json:"networkConfig,omitempty"`
+}
+
+// NetworkConfig describes a Docker bridge network the backend should manage.
+// Computed from CustomIPs; not user-editable.
+type NetworkConfig struct {
+	Name       string `json:"name"`
+	IPv4Subnet string `json:"ipv4Subnet,omitempty"`
+	IPv6Subnet string `json:"ipv6Subnet,omitempty"`
+	ProxyIPv4  string `json:"proxyIPv4,omitempty"`
+	ProxyIPv6  string `json:"proxyIPv6,omitempty"`
+}
+
+// subnetToNetworkName converts a subnet CIDR string to a Docker network name.
+// e.g. "169.254.169.0/24" → ".imds-169.254.169.0", "fd00:ec2::/64" → ".imds-fd00-ec2--"
+func subnetToNetworkName(subnet string) string {
+	if i := strings.Index(subnet, "/"); i != -1 {
+		subnet = subnet[:i]
+	}
+	subnet = strings.ReplaceAll(subnet, ":", "-")
+	return ".imds-" + subnet
+}
+
+// computeNetworkConfig derives the Docker network configuration needed to
+// handle the given IMDS addresses. Each subnet gets its own bridge network,
+// named after the subnet for stability across add/remove operations.
+func computeNetworkConfig(ips []string) []NetworkConfig {
+	seen := make(map[string]bool)
+	var configs []NetworkConfig
+
+	for _, ip := range ips {
+		ip = strings.TrimSpace(ip)
+		if ip == "" {
+			continue
+		}
+		parsed := net.ParseIP(ip)
+		if parsed == nil {
+			continue
+		}
+		var cfg NetworkConfig
+		var subnetStr string
+		if parsed.To4() != nil {
+			v4 := parsed.To4()
+			subnet := net.IPNet{IP: net.IPv4(v4[0], v4[1], v4[2], 0), Mask: net.CIDRMask(24, 32)}
+			subnetStr = subnet.String()
+			if seen[subnetStr] {
+				continue
+			}
+			cfg = NetworkConfig{
+				Name:       subnetToNetworkName(subnetStr),
+				IPv4Subnet: subnetStr,
+				ProxyIPv4:  ip,
+			}
+		} else {
+			v6 := parsed.To16()
+			prefix := make(net.IP, 16)
+			copy(prefix, v6[:8])
+			subnet := net.IPNet{IP: prefix, Mask: net.CIDRMask(64, 128)}
+			subnetStr = subnet.String()
+			if seen[subnetStr] {
+				continue
+			}
+			cfg = NetworkConfig{
+				Name:       subnetToNetworkName(subnetStr),
+				IPv6Subnet: subnetStr,
+				ProxyIPv6:  ip,
+			}
+		}
+		seen[subnetStr] = true
+		configs = append(configs, cfg)
+	}
+	return configs
 }
 
 type ProxyLookupRequest struct {
@@ -81,20 +153,11 @@ type NetworkInfo struct {
 	NetworkName string `json:"networkName"`
 }
 
-// ImdsNetwork is the internal representation of a managed IMDS network.
-// Providers maps provider name (e.g. "AWS") to the protocols it carries on
-// this network (e.g. ["v4", "v6"]).
-type ImdsNetwork struct {
-	NetworkName string
-	Providers   map[string][]string
-}
-
-// ProviderStatus is the per-container API representation of a cloud provider's
-// proxying state across all managed networks.
-type ProviderStatus struct {
-	Name          string `json:"name"`
-	IPv4Connected bool   `json:"ipv4Connected"`
-	IPv6Connected bool   `json:"ipv6Connected"`
+// AddressStatus is the per-container API representation of a single configured
+// IMDS IP address's connectivity state.
+type AddressStatus struct {
+	IP        string `json:"ip"`
+	Connected bool   `json:"connected"`
 }
 
 type ContainerInfo struct {
@@ -102,7 +165,7 @@ type ContainerInfo struct {
 	Name        string            `json:"name"`
 	Labels      map[string]string `json:"labels"`
 	Networks    []NetworkInfo     `json:"-"`
-	Providers   []ProviderStatus  `json:"providers"`
+	Addresses   []AddressStatus   `json:"addresses"`
 }
 
 type ContainersAPIResponse struct {
@@ -122,7 +185,7 @@ var (
 	ipToContainerID      = make(map[string]string)
 	ipToContainerIDMutex sync.RWMutex
 
-	managedNetworks      []ImdsNetwork
+	managedNetworks      []string
 	managedNetworksMutex sync.RWMutex
 
 	dockerClient DockerClient
@@ -134,6 +197,9 @@ var findContainerByIPFn = findContainerByIP
 // notifyProxyConfigUpdateFn is a variable so tests can replace it with a no-op
 // to avoid spawning background goroutines that race with test cleanup.
 var notifyProxyConfigUpdateFn = notifyProxyConfigUpdate
+
+// reconcileNetworksFn is a variable so tests can replace it with a no-op.
+var reconcileNetworksFn = reconcileNetworks
 
 func queryProxyContainerState(ctx context.Context, cli DockerClient) ProxyContainerState {
 	inspect, err := cli.ContainerInspect(ctx, proxyContainerName)
@@ -168,7 +234,10 @@ type DockerClient interface {
 	ContainerList(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
 	Events(ctx context.Context, options events.ListOptions) (<-chan events.Message, <-chan error)
 	NetworkConnect(ctx context.Context, networkID, containerID string, config *network.EndpointSettings) error
+	NetworkCreate(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error)
+	NetworkDisconnect(ctx context.Context, networkID, containerID string, force bool) error
 	NetworkList(ctx context.Context, options network.ListOptions) ([]network.Summary, error)
+	NetworkRemove(ctx context.Context, networkID string) error
 	ContainerPause(ctx context.Context, containerID string) error
 	ContainerUnpause(ctx context.Context, containerID string) error
 	Close() error
@@ -222,6 +291,20 @@ func main() {
 	if err := loadSettings(); err != nil {
 		logger.Warnf("Failed to load settings from disk: %v", err)
 	}
+
+	// Reconcile networks on startup so Docker state matches saved settings.
+	// Runs in background so startup is not blocked; also cleans up stale
+	// compose-managed networks left over from previous installs.
+	go func() {
+		settingsMutex.RLock()
+		netConfig := settings.NetworkConfig
+		settingsMutex.RUnlock()
+		rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := reconcileNetworksFn(rctx, dockerClient, netConfig); err != nil {
+			logger.Warnf("Startup network reconciliation failed: %v", err)
+		}
+	}()
 
 	// Start monitoring Docker events
 	go monitorDockerEvents()
@@ -362,6 +445,8 @@ func saveSettings(ctx echo.Context) error {
 		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "url is required"})
 	}
 
+	newSettings.NetworkConfig = computeNetworkConfig(newSettings.CustomIPs)
+
 	settingsMutex.Lock()
 	settings = newSettings
 	settingsMutex.Unlock()
@@ -372,10 +457,23 @@ func saveSettings(ctx echo.Context) error {
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to save settings"})
 	}
 
+	// Reconcile Docker networks to match the new config.
+	// Capture the function variable to avoid races with test cleanup.
+	reconcileFn := reconcileNetworksFn
+	dc := dockerClient // capture to avoid race with test cleanup
+	go func() {
+		rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := reconcileFn(rctx, dc, newSettings.NetworkConfig); err != nil {
+			logger.Errorf("Failed to reconcile networks after settings save: %v", err)
+		}
+	}()
+
 	// Notify proxy of config update
 	go notifyProxyConfigUpdateFn()
 
-	logger.Infof("Settings saved: url=%s", newSettings.URL)
+	logger.Infof("Settings saved: url=%s customIPs=%v networks=%d",
+		newSettings.URL, newSettings.CustomIPs, len(newSettings.NetworkConfig))
 	return ctx.JSON(http.StatusOK, map[string]string{"message": "Settings saved successfully"})
 }
 
@@ -393,7 +491,11 @@ func loadSettings() error {
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			logger.Infof("Settings file does not exist, starting with empty settings")
+			logger.Infof("Settings file does not exist, starting with defaults")
+			settingsMutex.Lock()
+			settings.CustomIPs = []string{"169.254.169.254"}
+			settings.NetworkConfig = computeNetworkConfig(settings.CustomIPs)
+			settingsMutex.Unlock()
 			return nil
 		}
 		return err
@@ -543,9 +645,23 @@ func monitorDockerEvents() {
 
 	logger.Infof("Started monitoring Docker container events")
 
-	// Discover managed IMDS networks
-	if err := discoverManagedNetworks(ctx, dockerClient); err != nil {
-		logger.Errorf("Failed to discover managed networks: %v", err)
+	// If we have saved network config, reconcile networks to match.
+	// Otherwise just discover what's already there (compose defaults).
+	settingsMutex.RLock()
+	savedNetConfig := settings.NetworkConfig
+	settingsMutex.RUnlock()
+
+	if len(savedNetConfig) > 0 {
+		rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		if err := reconcileNetworks(rctx, dockerClient, savedNetConfig); err != nil {
+			logger.Errorf("Failed to reconcile networks on startup: %v", err)
+		}
+		cancel()
+	} else {
+		// No saved config -- discover existing networks (compose defaults)
+		if err := discoverManagedNetworks(ctx, dockerClient); err != nil {
+			logger.Errorf("Failed to discover managed networks: %v", err)
+		}
 	}
 
 	// Scan existing containers
@@ -639,9 +755,9 @@ func addContainerToTrackingWithNetwork(ctx context.Context, cli DockerClient, co
 	managedNetworksMutex.RUnlock()
 
 	networksToConnect := []string{}
-	for _, mn := range knownNetworks {
-		if !connectedNetworks[mn.NetworkName] {
-			networksToConnect = append(networksToConnect, mn.NetworkName)
+	for _, networkName := range knownNetworks {
+		if !connectedNetworks[networkName] {
+			networksToConnect = append(networksToConnect, networkName)
 		}
 	}
 
@@ -754,76 +870,49 @@ func refreshContainerNetworks(ctx context.Context, cli DockerClient, containerID
 	return nil
 }
 
-// parseProviderLabel parses the imds-proxy.providers label value into a map
-// of provider name to the protocols it carries on that network.
-// Format: "AWS=v4,v6;GCP=v4,v6;OpenStack=v4"
-func parseProviderLabel(s string) map[string][]string {
-	result := make(map[string][]string)
-	for _, entry := range strings.Split(s, ";") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		parts := strings.SplitN(entry, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		name := strings.TrimSpace(parts[0])
-		protos := []string{}
-		for _, p := range strings.Split(parts[1], ",") {
-			p = strings.TrimSpace(p)
-			if p != "" {
-				protos = append(protos, p)
-			}
-		}
-		if name != "" {
-			result[name] = protos
-		}
+// ipInNetworkConfig reports whether ip falls within the subnet covered by cfg.
+func ipInNetworkConfig(ip string, cfg NetworkConfig) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
 	}
-	return result
+	if parsed.To4() != nil {
+		if cfg.IPv4Subnet == "" {
+			return false
+		}
+		_, subnet, err := net.ParseCIDR(cfg.IPv4Subnet)
+		if err != nil {
+			return false
+		}
+		return subnet.Contains(parsed)
+	}
+	if cfg.IPv6Subnet == "" {
+		return false
+	}
+	_, subnet, err := net.ParseCIDR(cfg.IPv6Subnet)
+	if err != nil {
+		return false
+	}
+	return subnet.Contains(parsed)
 }
 
-// buildProviderStatuses aggregates per-provider connectivity across all managed
-// networks, given the set of networks the container is currently connected to.
-func buildProviderStatuses(containerNetworks []NetworkInfo, managedNets []ImdsNetwork) []ProviderStatus {
+// buildAddressStatuses returns one AddressStatus per configured IP, reporting
+// whether the container is connected to the network that covers that address.
+func buildAddressStatuses(containerNetworks []NetworkInfo, netConfig []NetworkConfig, ips []string) []AddressStatus {
 	connectedNames := make(map[string]bool, len(containerNetworks))
 	for _, n := range containerNetworks {
 		connectedNames[n.NetworkName] = true
 	}
-
-	// Collect which protocols are connected per provider
-	connectedProtos := make(map[string]map[string]bool)
-	// Track all known provider names (to include disconnected ones)
-	allProviders := make(map[string]bool)
-
-	for _, mn := range managedNets {
-		connected := connectedNames[mn.NetworkName]
-		for provider, protos := range mn.Providers {
-			allProviders[provider] = true
-			if connected {
-				if connectedProtos[provider] == nil {
-					connectedProtos[provider] = make(map[string]bool)
-				}
-				for _, proto := range protos {
-					connectedProtos[provider][proto] = true
-				}
+	statuses := make([]AddressStatus, 0, len(ips))
+	for _, ip := range ips {
+		connected := false
+		for _, cfg := range netConfig {
+			if ipInNetworkConfig(ip, cfg) {
+				connected = connectedNames[cfg.Name]
+				break
 			}
 		}
-	}
-
-	names := make([]string, 0, len(allProviders))
-	for name := range allProviders {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	statuses := make([]ProviderStatus, 0, len(names))
-	for _, name := range names {
-		statuses = append(statuses, ProviderStatus{
-			Name:          name,
-			IPv4Connected: connectedProtos[name]["v4"],
-			IPv6Connected: connectedProtos[name]["v6"],
-		})
+		statuses = append(statuses, AddressStatus{IP: ip, Connected: connected})
 	}
 	return statuses
 }
@@ -836,12 +925,9 @@ func discoverManagedNetworks(ctx context.Context, cli DockerClient) error {
 		return err
 	}
 
-	discovered := make([]ImdsNetwork, 0, len(networkList))
+	discovered := make([]string, 0, len(networkList))
 	for _, n := range networkList {
-		discovered = append(discovered, ImdsNetwork{
-			NetworkName: n.Name,
-			Providers:   parseProviderLabel(n.Labels[imdsProvidersLabel]),
-		})
+		discovered = append(discovered, n.Name)
 	}
 
 	managedNetworksMutex.Lock()
@@ -852,17 +938,182 @@ func discoverManagedNetworks(ctx context.Context, cli DockerClient) error {
 	return nil
 }
 
+// reconcileNetworks creates, removes, and reconnects Docker networks so the
+// actual state matches the desired NetworkConfig. It also reconnects the proxy
+// container and all tracked containers to the new networks.
+func reconcileNetworks(ctx context.Context, cli DockerClient, desired []NetworkConfig) error {
+	// 1. List existing managed networks
+	existing, err := cli.NetworkList(ctx, network.ListOptions{
+		Filters: filters.NewArgs(filters.Arg("label", imdsManagedLabel+"=true")),
+	})
+	if err != nil {
+		return fmt.Errorf("listing managed networks: %w", err)
+	}
+
+	existingByName := make(map[string]network.Summary, len(existing))
+	for _, n := range existing {
+		existingByName[n.Name] = n
+	}
+
+	desiredByName := make(map[string]NetworkConfig, len(desired))
+	for _, d := range desired {
+		desiredByName[d.Name] = d
+	}
+
+	// 2. Remove networks that are no longer needed or whose subnets changed.
+	// Docker bridge networks can't be modified in place, so a subnet change
+	// requires removing and recreating the network.
+	for name, n := range existingByName {
+		d, want := desiredByName[name]
+		keep := want && networkSubnetsMatch(n, d)
+		if keep {
+			continue
+		}
+		reason := "unneeded"
+		if want {
+			reason = "subnet changed"
+		}
+		logger.Infof("Removing network %s (%s)", name, reason)
+		if err := disconnectAllFromNetwork(ctx, cli, name); err != nil {
+			logger.Warnf("Failed to disconnect containers from %s: %v", name, err)
+		}
+		if err := cli.NetworkRemove(ctx, n.ID); err != nil {
+			logger.Errorf("Failed to remove network %s: %v", name, err)
+			continue
+		}
+		delete(existingByName, name)
+	}
+
+	// 3. Create missing networks
+	for _, d := range desired {
+		if _, exists := existingByName[d.Name]; exists {
+			continue
+		}
+		logger.Infof("Creating network %s (v4=%s v6=%s)", d.Name, d.IPv4Subnet, d.IPv6Subnet)
+		ipamConfigs := []network.IPAMConfig{}
+		if d.IPv4Subnet != "" {
+			ipamConfigs = append(ipamConfigs, network.IPAMConfig{Subnet: d.IPv4Subnet})
+		}
+		if d.IPv6Subnet != "" {
+			ipamConfigs = append(ipamConfigs, network.IPAMConfig{Subnet: d.IPv6Subnet})
+		}
+
+		enableIPv6 := d.IPv6Subnet != ""
+		opts := network.CreateOptions{
+			Driver:     "bridge",
+			EnableIPv6: &enableIPv6,
+			IPAM: &network.IPAM{
+				Config: ipamConfigs,
+			},
+			Labels: map[string]string{
+				imdsManagedLabel: "true",
+			},
+		}
+		if _, err := cli.NetworkCreate(ctx, d.Name, opts); err != nil {
+			logger.Errorf("Failed to create network %s: %v", d.Name, err)
+			continue
+		}
+	}
+
+	// 4. Connect proxy container to new networks with correct IPs
+	for _, d := range desired {
+		endpointConfig := &network.EndpointSettings{}
+		if d.ProxyIPv4 != "" || d.ProxyIPv6 != "" {
+			ipamConfig := &network.EndpointIPAMConfig{}
+			if d.ProxyIPv4 != "" {
+				ipamConfig.IPv4Address = d.ProxyIPv4
+			}
+			if d.ProxyIPv6 != "" {
+				ipamConfig.IPv6Address = d.ProxyIPv6
+			}
+			endpointConfig.IPAMConfig = ipamConfig
+		}
+		if err := cli.NetworkConnect(ctx, d.Name, proxyContainerName, endpointConfig); err != nil {
+			// May already be connected -- log but don't fail
+			logger.Debugf("Connect proxy to %s: %v", d.Name, err)
+		}
+	}
+
+	// 5. Reconnect tracked containers to the new networks
+	trackedContainersMutex.RLock()
+	containerIDs := make([]string, 0, len(trackedContainers))
+	for id := range trackedContainers {
+		containerIDs = append(containerIDs, id)
+	}
+	trackedContainersMutex.RUnlock()
+
+	for _, cid := range containerIDs {
+		for _, d := range desired {
+			if err := cli.NetworkConnect(ctx, d.Name, cid, nil); err != nil {
+				logger.Debugf("Connect container %s to %s: %v", shortID(cid), d.Name, err)
+			}
+		}
+	}
+
+	// 6. Refresh the in-memory managed networks cache
+	if err := discoverManagedNetworks(ctx, cli); err != nil {
+		logger.Warnf("Failed to refresh managed networks after reconciliation: %v", err)
+	}
+
+	logger.Infof("Network reconciliation complete: %d network(s) configured", len(desired))
+	return nil
+}
+
+// networkSubnetsMatch reports whether an existing managed network's IPAM
+// subnets exactly match the desired NetworkConfig (set-equal on subnet CIDR).
+func networkSubnetsMatch(existing network.Summary, desired NetworkConfig) bool {
+	want := map[string]bool{}
+	if desired.IPv4Subnet != "" {
+		want[desired.IPv4Subnet] = true
+	}
+	if desired.IPv6Subnet != "" {
+		want[desired.IPv6Subnet] = true
+	}
+	have := map[string]bool{}
+	for _, c := range existing.IPAM.Config {
+		if c.Subnet != "" {
+			have[c.Subnet] = true
+		}
+	}
+	if len(want) != len(have) {
+		return false
+	}
+	for s := range want {
+		if !have[s] {
+			return false
+		}
+	}
+	return true
+}
+
+// disconnectAllFromNetwork disconnects all containers from a network.
+// networkName is the user-facing network name (matches keys in
+// c.NetworkSettings.Networks); NetworkDisconnect accepts either name or ID.
+func disconnectAllFromNetwork(ctx context.Context, cli DockerClient, networkName string) error {
+	containers, err := cli.ContainerList(ctx, container.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, c := range containers {
+		if _, attached := c.NetworkSettings.Networks[networkName]; attached {
+			_ = cli.NetworkDisconnect(ctx, networkName, c.ID, true)
+		}
+	}
+	return nil
+}
+
 func getContainers(ctx echo.Context) error {
 	trackedContainersMutex.RLock()
 	defer trackedContainersMutex.RUnlock()
 
-	managedNetworksMutex.RLock()
-	networks := managedNetworks
-	managedNetworksMutex.RUnlock()
+	settingsMutex.RLock()
+	netConfig := settings.NetworkConfig
+	customIPs := settings.CustomIPs
+	settingsMutex.RUnlock()
 
 	containerList := make([]ContainerInfo, 0, len(trackedContainers))
 	for _, info := range trackedContainers {
-		info.Providers = buildProviderStatuses(info.Networks, networks)
+		info.Addresses = buildAddressStatuses(info.Networks, netConfig, customIPs)
 		containerList = append(containerList, info)
 	}
 

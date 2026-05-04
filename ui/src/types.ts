@@ -13,12 +13,11 @@
 // limitations under the License.
 
 /**
- * Per-provider IMDS proxying status for a container
+ * Connectivity status for a single configured IMDS IP address
  */
-export interface ProviderStatus {
-  name: string;
-  ipv4Connected: boolean;
-  ipv6Connected: boolean;
+export interface AddressStatus {
+  ip: string;
+  connected: boolean;
 }
 
 /**
@@ -28,7 +27,7 @@ export interface ContainerInfo {
   containerId: string;
   name: string;
   labels: Record<string, string>;
-  providers: ProviderStatus[];
+  addresses: AddressStatus[];
 }
 
 /**
@@ -36,6 +35,7 @@ export interface ContainerInfo {
  */
 export interface SettingsResponse {
   url?: string;
+  customIPs?: string[];
 }
 
 /**
@@ -68,15 +68,3 @@ export const isContainersResponse = (value: unknown): value is ContainersRespons
   const v = value as Record<string, unknown>;
   return Array.isArray(v.containers) && typeof v.proxyStatus === 'string';
 };
-
-/**
- * Returns true if the provider has full proxying (both IPv4 and IPv6)
- */
-export const isProviderFullyConnected = (p: ProviderStatus): boolean =>
-  p.ipv4Connected && p.ipv6Connected;
-
-/**
- * Returns true if the provider has partial proxying (one of IPv4/IPv6)
- */
-export const isProviderPartiallyConnected = (p: ProviderStatus): boolean =>
-  p.ipv4Connected !== p.ipv6Connected;

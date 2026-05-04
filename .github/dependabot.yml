@@ -6,7 +6,17 @@
 
 version: 2
 updates:
- - package-ecosystem: "devcontainers"
-   directory: "/"
-   schedule:
-     interval: weekly
+  - package-ecosystem: "devcontainers"
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: "gomod"
+    directory: "/backend"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: "gomod"
+    directory: "/proxy"
+    schedule:
+      interval: weekly

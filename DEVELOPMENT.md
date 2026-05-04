@@ -74,7 +74,7 @@ make run-test-server
 make run-test-server-port PORT=9000
 ```
 
-The server runs in the foreground and logs all incoming requests, including headers. Point the extension at `http://localhost:8080` (or your custom port) — the proxy rewrites `localhost` to `host.docker.internal` automatically.
+The server runs in the foreground and logs all incoming requests, including headers. Point the extension at `http://localhost:8080` (or your custom port) - the proxy rewrites `localhost` to `host.docker.internal` automatically.
 
 ## UI development
 

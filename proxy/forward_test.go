@@ -125,7 +125,7 @@ func TestForwardRequestContainerHeaders(t *testing.T) {
 
 func TestForwardRequestError(t *testing.T) {
 	originalURL := getForwardURL()
-	// Port 1 is reserved/unreachable on Linux — connection refused
+	// Port 1 is reserved/unreachable on Linux - connection refused
 	setForwardURL("http://127.0.0.1:1")
 	t.Cleanup(func() { setForwardURL(originalURL) })
 
@@ -226,5 +226,5 @@ func TestForwardRequestLocalhostRewrite(t *testing.T) {
 	// we just verify it attempted the rewrite (no panic, error expected since
 	// host.docker.internal may not resolve in CI).
 	_ = forwardRequest(rec, req, &lookupResponse{ContainerID: "abc", Name: "/app", Labels: map[string]string{}})
-	// No assertion on success — this test exercises the rewrite code path.
+	// No assertion on success - this test exercises the rewrite code path.
 }

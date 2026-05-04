@@ -307,10 +307,10 @@ export function App() {
                 </Button>
               }
             >
-              {proxyContainerState === 'paused' && 'The IMDS proxy container is paused — IMDS requests are not being proxied.'}
-              {proxyContainerState === 'stopped' && 'The IMDS proxy container has stopped — IMDS requests are not being proxied.'}
-              {proxyContainerState === 'failed' && 'The IMDS proxy container has crashed — IMDS requests are not being proxied.'}
-              {proxyContainerState === 'missing' && 'The IMDS proxy container is not running — IMDS requests are not being proxied.'}
+              {proxyContainerState === 'paused' && 'The IMDS proxy container is paused - IMDS requests are not being proxied.'}
+              {proxyContainerState === 'stopped' && 'The IMDS proxy container has stopped - IMDS requests are not being proxied.'}
+              {proxyContainerState === 'failed' && 'The IMDS proxy container has crashed - IMDS requests are not being proxied.'}
+              {proxyContainerState === 'missing' && 'The IMDS proxy container is not running - IMDS requests are not being proxied.'}
             </Alert>
           )}
 

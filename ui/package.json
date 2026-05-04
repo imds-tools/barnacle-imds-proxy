@@ -33,16 +33,16 @@
   "devDependencies": {
     "@docker/extension-api-client-types": "0.4.2",
     "@testing-library/react": "^14.0.0",
-    "@types/node": "^18.7.18",
+    "@types/node": "^22.19.17",
     "@types/react": "^18.0.17",
     "@types/react-dom": "^18.0.6",
     "@vitejs/plugin-react": "^4.7.0",
-    "@vitest/coverage-v8": "^2.1.9",
-    "@vitest/ui": "^2.1.9",
+    "@vitest/coverage-v8": "^3.2.4",
+    "@vitest/ui": "^3.2.4",
     "jsdom": "^22.1.0",
     "typescript": "^4.8.3",
-    "vite": "^6.4.1",
-    "vitest": "^2.1.9"
+    "vite": "^7.3.2",
+    "vitest": "^3.2.4"
   },
   "packageManager": "pnpm@10.29.3+sha512.498e1fb4cca5aa06c1dcf2611e6fafc50972ffe7189998c409e90de74566444298ffe43e6cd2acdc775ba1aa7cc5e092a8b7054c811ba8c5770f84693d33d2dc"
 }
