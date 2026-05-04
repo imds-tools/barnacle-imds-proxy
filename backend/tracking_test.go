@@ -171,10 +171,7 @@ func TestAddAndRemoveContainerTracking(t *testing.T) {
 	defer resetTracking()
 
 	managedNetworksMutex.Lock()
-	managedNetworks = []ImdsNetwork{
-		{NetworkName: ".imds-0", Providers: map[string][]string{"AWS": {"v4", "v6"}}},
-		{NetworkName: ".imds-1", Providers: map[string][]string{"OpenStack": {"v6"}}},
-	}
+	managedNetworks = []string{".imds-0", ".imds-1"}
 	managedNetworksMutex.Unlock()
 	defer func() {
 		managedNetworksMutex.Lock()
@@ -266,9 +263,7 @@ func TestAddContainerToTrackingWithNetworkPauseFirst(t *testing.T) {
 	defer resetTracking()
 
 	managedNetworksMutex.Lock()
-	managedNetworks = []ImdsNetwork{
-		{NetworkName: ".imds-0", Providers: map[string][]string{"AWS": {"v4", "v6"}}},
-	}
+	managedNetworks = []string{".imds-0"}
 	managedNetworksMutex.Unlock()
 	defer func() {
 		managedNetworksMutex.Lock()
@@ -1155,19 +1150,14 @@ func TestDiscoverManagedNetworksEmpty(t *testing.T) {
 	}
 }
 
-func TestDiscoverManagedNetworksWithProviders(t *testing.T) {
+func TestDiscoverManagedNetworksWithNetworks(t *testing.T) {
 	resetManagedNetworks()
 	t.Cleanup(resetManagedNetworks)
 
 	cli := &fakeDockerClient{
 		networkList: []network.Summary{
-			{
-				Name: ".imds-0",
-				Labels: map[string]string{
-					"imds-proxy.managed":   "true",
-					"imds-proxy.providers": "AWS=v4,v6;GCP=v4,v6;OpenStack=v4",
-				},
-			},
+			{Name: ".imds-0", Labels: map[string]string{"imds-proxy.managed": "true"}},
+			{Name: ".imds-1", Labels: map[string]string{"imds-proxy.managed": "true"}},
 		},
 	}
 
@@ -1179,22 +1169,17 @@ func TestDiscoverManagedNetworksWithProviders(t *testing.T) {
 	nets := managedNetworks
 	managedNetworksMutex.RUnlock()
 
-	if len(nets) != 1 {
-		t.Fatalf("want 1 managed network, got %d", len(nets))
+	if len(nets) != 2 {
+		t.Fatalf("want 2 managed networks, got %d", len(nets))
 	}
-	if nets[0].NetworkName != ".imds-0" {
-		t.Errorf("want network name .imds-0, got %s", nets[0].NetworkName)
+	found := map[string]bool{}
+	for _, name := range nets {
+		found[name] = true
 	}
-	if len(nets[0].Providers) != 3 {
-		t.Fatalf("want 3 providers, got %d", len(nets[0].Providers))
-	}
-	for _, name := range []string{"AWS", "GCP", "OpenStack"} {
-		if _, ok := nets[0].Providers[name]; !ok {
-			t.Errorf("want provider %s in Providers map, got %v", name, nets[0].Providers)
+	for _, want := range []string{".imds-0", ".imds-1"} {
+		if !found[want] {
+			t.Errorf("want network %s in managed networks, got %v", want, nets)
 		}
-	}
-	if got := nets[0].Providers["AWS"]; len(got) != 2 || got[0] != "v4" || got[1] != "v6" {
-		t.Errorf("want AWS=[v4 v6], got %v", got)
 	}
 }
 

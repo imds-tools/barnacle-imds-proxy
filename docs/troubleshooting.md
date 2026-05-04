@@ -47,13 +47,13 @@ docker inspect <container-name> --format '{{index .Config.Labels "imds-proxy.ena
 
 Should output `true`.
 
-**Check network attachment.** The container should be connected to both IMDS networks. The provider pills in the UI show this at a glance. To check directly:
+**Check network attachment.** The Networks column in the Containers tab shows a chip per configured IP — green means connected. To check directly:
 
 ```bash
 docker inspect <container-name> --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
 ```
 
-Look for names ending in `.imds-0` and `.imds-1`.
+Look for names starting with `.imds-` (e.g. `.imds-169.254.169.0`).
 
 **Check the IMDS address is reachable from the container.**
 
@@ -67,19 +67,17 @@ If that times out but the container is attached to the IMDS network, the proxy m
 
 ---
 
-## Provider pills are yellow or red
+## Network chips are grey
 
-Yellow means one IMDS network is connected but not the other. Red means neither is connected.
+Grey means the container is not connected to that IMDS network. This usually happens right after a container starts (the controller hasn't finished attaching it yet) or if a network was manually disconnected.
 
-This usually happens right after a container starts (the controller hasn't finished attaching it yet) or if a network was manually disconnected.
-
-If the pills stay red after a minute, check whether the IMDS networks exist:
+If the chips stay grey after a minute, check whether the IMDS networks exist:
 
 ```bash
 docker network ls | grep imds
 ```
 
-You should see two networks with names ending in `.imds-0` and `.imds-1`. If they're missing, reinstalling the extension will recreate them.
+You should see one network per configured IP address (e.g. `.imds-169.254.169.0`). If they're missing, reinstalling the extension will recreate them.
 
 ---
 

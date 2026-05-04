@@ -273,7 +273,7 @@ export function SettingsForm({ ddClient, service, showSnackbar, proxyUnreachable
             <TextField
               type="text"
               label="IP address"
-              placeholder="e.g. 10.0.0.1 or fd00::1"
+              placeholder="e.g. 169.254.169.254 or fd00:ec2::254"
               value={newIP}
               onChange={(e) => { setNewIP(e.target.value); setIpError(''); }}
               variant="outlined"
