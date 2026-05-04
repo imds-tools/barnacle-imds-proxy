@@ -186,9 +186,25 @@ var tracker = &containerTracker{
 	ipToContainerID: make(map[string]string),
 }
 
+type settingsStore struct {
+	mu sync.RWMutex
+	v  Settings
+}
+
+func (s *settingsStore) Get() Settings {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.v
+}
+
+func (s *settingsStore) Set(v Settings) {
+	s.mu.Lock()
+	s.v = v
+	s.mu.Unlock()
+}
+
 var (
-	settings         Settings
-	settingsMutex    sync.RWMutex
+	settings         = &settingsStore{}
 	settingsPath     = "/data/settings.json"
 	proxyComposePath = "/imds-proxy-compose.yaml"
 
@@ -302,9 +318,7 @@ func main() {
 	// Reconcile networks before starting the HTTP server so the proxy is
 	// attached to all IMDS networks before the backend reports itself as ready.
 	{
-		settingsMutex.RLock()
-		netConfig := settings.NetworkConfig
-		settingsMutex.RUnlock()
+		netConfig := settings.Get().NetworkConfig
 		rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := reconcileNetworksFn(rctx, dockerClient, netConfig); err != nil {
@@ -430,9 +444,7 @@ type HTTPMessageBody struct {
 }
 
 func getSettings(ctx echo.Context) error {
-	settingsMutex.RLock()
-	defer settingsMutex.RUnlock()
-	return ctx.JSON(http.StatusOK, settings)
+	return ctx.JSON(http.StatusOK, settings.Get())
 }
 
 func saveSettings(ctx echo.Context) error {
@@ -448,9 +460,7 @@ func saveSettings(ctx echo.Context) error {
 
 	newSettings.NetworkConfig = computeNetworkConfig(newSettings.CustomIPs)
 
-	settingsMutex.Lock()
-	settings = newSettings
-	settingsMutex.Unlock()
+	settings.Set(newSettings)
 
 	// Persist settings to disk
 	if err := persistSettings(); err != nil {
@@ -493,10 +503,10 @@ func loadSettings() error {
 	if err != nil {
 		if os.IsNotExist(err) {
 			logger.Infof("Settings file does not exist, starting with defaults")
-			settingsMutex.Lock()
-			settings.CustomIPs = []string{"169.254.169.254"}
-			settings.NetworkConfig = computeNetworkConfig(settings.CustomIPs)
-			settingsMutex.Unlock()
+			s := settings.Get()
+			s.CustomIPs = []string{"169.254.169.254"}
+			s.NetworkConfig = computeNetworkConfig(s.CustomIPs)
+			settings.Set(s)
 			return nil
 		}
 		return err
@@ -507,12 +517,8 @@ func loadSettings() error {
 		return err
 	}
 
-	settingsMutex.Lock()
-	settings = loadedSettings
-	logURL := settings.URL
-	settingsMutex.Unlock()
-
-	logger.Infof("Settings loaded from disk: url=%s", logURL)
+	settings.Set(loadedSettings)
+	logger.Infof("Settings loaded from disk: url=%s", loadedSettings.URL)
 	return nil
 }
 
@@ -522,12 +528,8 @@ func handleProxyGetSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	settingsMutex.RLock()
-	currentSettings := settings
-	settingsMutex.RUnlock()
-
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(currentSettings); err != nil {
+	if err := json.NewEncoder(w).Encode(settings.Get()); err != nil {
 		logger.Errorf("Failed to encode settings response: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -601,11 +603,7 @@ func persistSettings() error {
 		return err
 	}
 
-	settingsMutex.RLock()
-	currentSettings := settings
-	settingsMutex.RUnlock()
-
-	data, err := json.MarshalIndent(currentSettings, "", "  ")
+	data, err := json.MarshalIndent(settings.Get(), "", "  ")
 	if err != nil {
 		return err
 	}
@@ -625,9 +623,7 @@ func monitorDockerEvents() {
 
 	// If we have saved network config, reconcile networks to match.
 	// Otherwise just discover what's already there (compose defaults).
-	settingsMutex.RLock()
-	savedNetConfig := settings.NetworkConfig
-	settingsMutex.RUnlock()
+	savedNetConfig := settings.Get().NetworkConfig
 
 	if len(savedNetConfig) > 0 {
 		rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -1088,10 +1084,9 @@ func getContainers(ctx echo.Context) error {
 	tracker.mu.RLock()
 	defer tracker.mu.RUnlock()
 
-	settingsMutex.RLock()
-	netConfig := settings.NetworkConfig
-	customIPs := settings.CustomIPs
-	settingsMutex.RUnlock()
+	s := settings.Get()
+	netConfig := s.NetworkConfig
+	customIPs := s.CustomIPs
 
 	containerList := make([]ContainerInfo, 0, len(tracker.byID))
 	for _, info := range tracker.byID {
