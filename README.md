@@ -55,11 +55,13 @@ Search for "Barnacle" in the Docker Desktop Extensions Marketplace.
 
 Any IPv4 or IPv6 address you add in Settings is intercepted. These are the well-known IMDS addresses for major providers:
 
-| Provider  | Address               | Protocol |
-|-----------|-----------------------|----------|
-| AWS / GCP | `169.254.169.254`     | IPv4     |
-| AWS       | `fd00:ec2::254`       | IPv6     |
-| OpenStack | `fd00:a9fe:a9fe::254` | IPv6     |
+| Provider       | Address               | Protocol |
+|----------------|-----------------------|----------|
+| AWS / GCP      | `169.254.169.254`     | IPv4     |
+| AWS            | `fd00:ec2::254`       | IPv6     |
+| OpenStack      | `fd00:a9fe:a9fe::254` | IPv6     |
+| Alibaba Cloud  | `100.100.100.200`     | IPv4     |
+| Tencent Cloud  | `169.254.0.23`        | IPv4     |
 
 ## How it works
 

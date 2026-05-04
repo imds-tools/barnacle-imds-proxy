@@ -201,7 +201,7 @@ while ($listener.IsListening) {
 
 ## Alibaba Cloud
 
-> **Note:** Alibaba Cloud IMDS uses address `100.100.100.200`, which requires a future Barnacle update to proxy. The recipe below will work once that support is added.
+Add `100.100.100.200` in Settings to intercept Alibaba Cloud IMDS traffic.
 
 Returns RAM role credentials. Reads the `ALIBABA_ROLE` label to select which RAM role to assume. Requires the `aliyun` CLI.
 
@@ -263,7 +263,7 @@ while ($listener.IsListening) {
 
 ## Tencent Cloud
 
-> **Note:** Tencent Cloud IMDS uses address `169.254.0.23`, which requires a future Barnacle update to proxy. The recipe below will work once that support is added.
+Add `169.254.0.23` in Settings to intercept Tencent Cloud IMDS traffic.
 
 Returns CAM role credentials. Reads the `TENCENT_ROLE` label to select which CAM role to use. Requires the `tccli` CLI.
 
