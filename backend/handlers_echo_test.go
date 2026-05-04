@@ -51,14 +51,8 @@ func withTempSettingsPath(t *testing.T) {
 
 func withSettings(t *testing.T, s Settings) {
 	t.Helper()
-	settingsMutex.Lock()
-	settings = s
-	settingsMutex.Unlock()
-	t.Cleanup(func() {
-		settingsMutex.Lock()
-		settings = Settings{}
-		settingsMutex.Unlock()
-	})
+	settings.Set(s)
+	t.Cleanup(func() { settings.Set(Settings{}) })
 }
 
 func TestHello(t *testing.T) {
@@ -121,10 +115,7 @@ func TestSaveSettingsValid(t *testing.T) {
 		t.Fatalf("want status 200, got %d", rec.Code)
 	}
 
-	settingsMutex.RLock()
-	gotURL := settings.URL
-	settingsMutex.RUnlock()
-	if gotURL != "http://example.com" {
+	if gotURL := settings.Get().URL; gotURL != "http://example.com" {
 		t.Errorf("want settings URL %q, got %q", "http://example.com", gotURL)
 	}
 }
@@ -186,9 +177,7 @@ func TestSaveSettingsWithCustomIPs(t *testing.T) {
 		t.Fatalf("want status 200, got %d", rec.Code)
 	}
 
-	settingsMutex.RLock()
-	nets := settings.NetworkConfig
-	settingsMutex.RUnlock()
+	nets := settings.Get().NetworkConfig
 
 	if len(nets) != 2 {
 		t.Fatalf("want 2 network configs, got %d", len(nets))
@@ -410,16 +399,11 @@ func TestGetContainersWithData(t *testing.T) {
 	}
 	tracker.mu.Unlock()
 
-	settingsMutex.Lock()
-	settings.CustomIPs = []string{"169.254.169.254"}
-	settings.NetworkConfig = []NetworkConfig{{Name: ".imds-0", IPv4Subnet: "169.254.169.0/24", ProxyIPv4: "169.254.169.254"}}
-	settingsMutex.Unlock()
-	t.Cleanup(func() {
-		settingsMutex.Lock()
-		settings.CustomIPs = nil
-		settings.NetworkConfig = nil
-		settingsMutex.Unlock()
+	settings.Set(Settings{
+		CustomIPs:     []string{"169.254.169.254"},
+		NetworkConfig: []NetworkConfig{{Name: ".imds-0", IPv4Subnet: "169.254.169.0/24", ProxyIPv4: "169.254.169.254"}},
 	})
+	t.Cleanup(func() { settings.Set(Settings{}) })
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/containers", nil)

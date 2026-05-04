@@ -61,10 +61,8 @@ func TestLoadSettingsValidJSON(t *testing.T) {
 		t.Fatalf("want no error, got %v", err)
 	}
 
-	settingsMutex.RLock()
-	defer settingsMutex.RUnlock()
-	if settings.URL != "http://example.com" {
-		t.Fatalf("want URL to be loaded, got %q", settings.URL)
+	if settings.Get().URL != "http://example.com" {
+		t.Fatalf("want URL to be loaded, got %q", settings.Get().URL)
 	}
 }
 
@@ -74,9 +72,7 @@ func TestPersistSettingsWritesFile(t *testing.T) {
 	settingsPath = filepath.Join(tempDir, "settings.json")
 	defer func() { settingsPath = originalPath }()
 
-	settingsMutex.Lock()
-	settings = Settings{URL: "http://example.com"}
-	settingsMutex.Unlock()
+	settings.Set(Settings{URL: "http://example.com"})
 
 	if err := persistSettings(); err != nil {
 		t.Fatalf("want no error, got %v", err)
@@ -99,14 +95,8 @@ func TestPersistSettingsWriteError(t *testing.T) {
 	settingsPath = tempDir
 	defer func() { settingsPath = originalPath }()
 
-	settingsMutex.Lock()
-	settings = Settings{URL: "http://write-error.example.com"}
-	settingsMutex.Unlock()
-	defer func() {
-		settingsMutex.Lock()
-		settings = Settings{}
-		settingsMutex.Unlock()
-	}()
+	settings.Set(Settings{URL: "http://write-error.example.com"})
+	defer func() { settings.Set(Settings{}) }()
 
 	if err := persistSettings(); err == nil {
 		t.Fatal("want error when writing to a directory path, got nil")
@@ -119,14 +109,8 @@ func TestPersistSettingsNestedDir(t *testing.T) {
 	settingsPath = filepath.Join(tempDir, "nested", "deep", "settings.json")
 	defer func() { settingsPath = originalPath }()
 
-	settingsMutex.Lock()
-	settings = Settings{URL: "http://nested.example.com"}
-	settingsMutex.Unlock()
-	defer func() {
-		settingsMutex.Lock()
-		settings = Settings{}
-		settingsMutex.Unlock()
-	}()
+	settings.Set(Settings{URL: "http://nested.example.com"})
+	defer func() { settings.Set(Settings{}) }()
 
 	if err := persistSettings(); err != nil {
 		t.Fatalf("persistSettings() with nested dir returned error: %v", err)

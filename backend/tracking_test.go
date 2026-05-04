@@ -447,9 +447,7 @@ func TestConcurrentSettingsAccess(t *testing.T) {
 			defer wg.Done()
 
 			for j := 0; j < numOperations; j++ {
-				settingsMutex.RLock()
-				_ = settings.URL
-				settingsMutex.RUnlock()
+				_ = settings.Get().URL
 			}
 		}()
 	}
@@ -460,9 +458,9 @@ func TestConcurrentSettingsAccess(t *testing.T) {
 			defer wg.Done()
 
 			for j := 0; j < numOperations; j++ {
-				settingsMutex.Lock()
-				settings.URL = fmt.Sprintf("http://example.com/%d-%d", id, j)
-				settingsMutex.Unlock()
+				s := settings.Get()
+				s.URL = fmt.Sprintf("http://example.com/%d-%d", id, j)
+				settings.Set(s)
 			}
 		}(i)
 	}
@@ -982,11 +980,9 @@ func TestStressRapidSettingsChanges(t *testing.T) {
 
 			for j := 0; j < numUpdates; j++ {
 				// Write settings
-				settingsMutex.Lock()
-				settings = Settings{
+				settings.Set(Settings{
 					URL: fmt.Sprintf("http://test-%d-%d.example.com", id, j),
-				}
-				settingsMutex.Unlock()
+				})
 
 				if err := persistSettings(); err != nil {
 					// Some errors expected due to concurrent writes
@@ -1006,10 +1002,7 @@ func TestStressRapidSettingsChanges(t *testing.T) {
 	if err != nil {
 		t.Logf("Final settings load returned error: %v (acceptable)", err)
 	} else {
-		settingsMutex.RLock()
-		finalURL := settings.URL
-		settingsMutex.RUnlock()
-		t.Logf("Final settings URL: %s", finalURL)
+		t.Logf("Final settings URL: %s", settings.Get().URL)
 	}
 }
 

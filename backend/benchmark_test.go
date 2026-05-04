@@ -89,15 +89,11 @@ func BenchmarkIPLookup(b *testing.B) {
 
 // BenchmarkSettingsAccess measures performance of settings read operations
 func BenchmarkSettingsAccess(b *testing.B) {
-	settingsMutex.Lock()
-	settings = Settings{URL: "http://benchmark.example.com"}
-	settingsMutex.Unlock()
+	settings.Set(Settings{URL: "http://benchmark.example.com"})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		settingsMutex.RLock()
-		_ = settings.URL
-		settingsMutex.RUnlock()
+		_ = settings.Get().URL
 	}
 }
 
