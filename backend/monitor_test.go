@@ -330,7 +330,7 @@ func TestStartProxySocketServer(t *testing.T) {
 
 	withSettings(t, Settings{URL: "http://proxy-server-test.example.com"})
 	withDockerClient(t, &fakeDockerClient{})
-	withFindContainerByIP(t, func(_ context.Context, _ DockerClient, _ string) (*ProxyLookupResponse, error) {
+	withFindContainerByIP(t, func(_ string) (*ProxyLookupResponse, error) {
 		return nil, nil
 	})
 

@@ -138,6 +138,7 @@ func TestUpdateAndRemoveIPIndex(t *testing.T) {
 		Networks: []NetworkInfo{{
 			NetworkID:   "net-1",
 			NetworkName: "imds",
+			IPAddress:   "10.0.0.1",
 		}},
 	}
 	tracker.mu.Unlock()
@@ -145,7 +146,7 @@ func TestUpdateAndRemoveIPIndex(t *testing.T) {
 	updateIPIndex(containerID)
 
 	tracker.mu.RLock()
-	if got := tracker.ipToContainerID["net-1"]; got != containerID {
+	if got := tracker.ipToContainerID["10.0.0.1"]; got != containerID {
 		tracker.mu.RUnlock()
 		t.Fatalf("want ip index to be set, got %q", got)
 	}
@@ -154,7 +155,7 @@ func TestUpdateAndRemoveIPIndex(t *testing.T) {
 	removeIPIndexForContainer(containerID, tracker.byID[containerID])
 
 	tracker.mu.RLock()
-	if _, ok := tracker.ipToContainerID["net-1"]; ok {
+	if _, ok := tracker.ipToContainerID["10.0.0.1"]; ok {
 		tracker.mu.RUnlock()
 		t.Fatalf("want ip index to be cleared")
 	}
@@ -201,9 +202,11 @@ func TestAddAndRemoveContainerTracking(t *testing.T) {
 			Networks: map[string]*network.EndpointSettings{
 				".imds-0": {
 					NetworkID: "net-aws",
+					IPAddress: "172.20.0.2",
 				},
 				".imds-1": {
 					NetworkID: "net-os",
+					IPAddress: "172.21.0.2",
 				},
 			},
 		},
@@ -233,13 +236,13 @@ func TestAddAndRemoveContainerTracking(t *testing.T) {
 	}
 
 	tracker.mu.RLock()
-	if got := tracker.ipToContainerID["net-aws"]; got != containerID {
+	if got := tracker.ipToContainerID["172.20.0.2"]; got != containerID {
 		tracker.mu.RUnlock()
-		t.Fatalf("want net-aws mapping, got %q", got)
+		t.Fatalf("want 172.20.0.2 mapping, got %q", got)
 	}
-	if got := tracker.ipToContainerID["net-os"]; got != containerID {
+	if got := tracker.ipToContainerID["172.21.0.2"]; got != containerID {
 		tracker.mu.RUnlock()
-		t.Fatalf("want net-os mapping, got %q", got)
+		t.Fatalf("want 172.21.0.2 mapping, got %q", got)
 	}
 	tracker.mu.RUnlock()
 
@@ -334,7 +337,7 @@ func TestConcurrentContainerTracking(t *testing.T) {
 					ContainerID: containerID,
 					Name:        fmt.Sprintf("/test-%d-%d", id, j),
 					Networks: []NetworkInfo{
-						{NetworkID: ipAddr, NetworkName: fmt.Sprintf("net-%d", j)},
+						{NetworkID: ipAddr, NetworkName: fmt.Sprintf("net-%d", j), IPAddress: ipAddr},
 					},
 				}
 
@@ -387,7 +390,7 @@ func TestConcurrentIPLookup(t *testing.T) {
 			ContainerID: containerID,
 			Name:        fmt.Sprintf("/test-%d", i),
 			Networks: []NetworkInfo{
-				{NetworkID: ipAddr, NetworkName: fmt.Sprintf("net-%d", i)},
+				{NetworkID: ipAddr, NetworkName: fmt.Sprintf("net-%d", i), IPAddress: ipAddr},
 			},
 		}
 
@@ -588,7 +591,7 @@ func TestEdgeCaseUnicodeContainerName(t *testing.T) {
 				ContainerID: containerID,
 				Name:        tc.containerName,
 				Networks: []NetworkInfo{
-					{NetworkID: ipAddr, NetworkName: "bridge"},
+					{NetworkID: ipAddr, NetworkName: "bridge", IPAddress: ipAddr},
 				},
 			}
 
@@ -637,7 +640,7 @@ func TestEdgeCaseVeryLongContainerID(t *testing.T) {
 		ContainerID: longID,
 		Name:        "/test-long-id",
 		Networks: []NetworkInfo{
-			{NetworkID: ipAddr, NetworkName: "bridge"},
+			{NetworkID: ipAddr, NetworkName: "bridge", IPAddress: ipAddr},
 		},
 	}
 
@@ -1286,29 +1289,12 @@ func TestFindContainerByIPFound(t *testing.T) {
 		ContainerID: containerID,
 		Name:        "/ip-test",
 		Labels:      map[string]string{"app": "test"},
-		Networks:    []NetworkInfo{{NetworkName: ".imds-0", NetworkID: "net-x"}},
+		Networks:    []NetworkInfo{{NetworkName: ".imds-169.254.169.0", NetworkID: "net-x", IPAddress: "10.5.0.42"}},
 	}
+	tracker.ipToContainerID["10.5.0.42"] = containerID
 	tracker.mu.Unlock()
 
-	cli := &fakeDockerClient{
-		inspectSequence: []container.InspectResponse{
-			{
-				ContainerJSONBase: &container.ContainerJSONBase{
-					ID:    containerID,
-					Name:  "/ip-test",
-					State: &container.State{Running: true},
-				},
-				Config: &container.Config{Labels: map[string]string{"app": "test"}},
-				NetworkSettings: &container.NetworkSettings{
-					Networks: map[string]*network.EndpointSettings{
-						".imds-0": {NetworkID: "net-x", IPAddress: "10.5.0.42"},
-					},
-				},
-			},
-		},
-	}
-
-	resp, err := findContainerByIP(context.Background(), cli, "10.5.0.42")
+	resp, err := findContainerByIP("10.5.0.42")
 	if err != nil {
 		t.Fatalf("want no error, got %v", err)
 	}
@@ -1324,35 +1310,7 @@ func TestFindContainerByIPNotFound(t *testing.T) {
 	resetTracking()
 	t.Cleanup(resetTracking)
 
-	containerID := "ipnotfound456"
-	tracker.mu.Lock()
-	tracker.byID[containerID] = ContainerInfo{
-		ContainerID: containerID,
-		Name:        "/no-ip",
-		Labels:      map[string]string{},
-		Networks:    []NetworkInfo{{NetworkName: ".imds-0", NetworkID: "net-y"}},
-	}
-	tracker.mu.Unlock()
-
-	cli := &fakeDockerClient{
-		inspectSequence: []container.InspectResponse{
-			{
-				ContainerJSONBase: &container.ContainerJSONBase{
-					ID:    containerID,
-					Name:  "/no-ip",
-					State: &container.State{Running: true},
-				},
-				Config: &container.Config{Labels: map[string]string{}},
-				NetworkSettings: &container.NetworkSettings{
-					Networks: map[string]*network.EndpointSettings{
-						".imds-0": {NetworkID: "net-y", IPAddress: "10.5.0.1"},
-					},
-				},
-			},
-		},
-	}
-
-	resp, err := findContainerByIP(context.Background(), cli, "192.168.99.99")
+	resp, err := findContainerByIP("192.168.99.99")
 	if err != nil {
 		t.Fatalf("want no error, got %v", err)
 	}
@@ -1361,28 +1319,20 @@ func TestFindContainerByIPNotFound(t *testing.T) {
 	}
 }
 
-func TestFindContainerByIPInspectError(t *testing.T) {
+func TestFindContainerByIPStaleIndex(t *testing.T) {
 	resetTracking()
 	t.Cleanup(resetTracking)
 
-	containerID := "inspect-err-789"
+	// IP is in the index but the container is no longer in byID (stale entry).
 	tracker.mu.Lock()
-	tracker.byID[containerID] = ContainerInfo{
-		ContainerID: containerID,
-		Name:        "/err-container",
-		Labels:      map[string]string{},
-		Networks:    []NetworkInfo{{NetworkName: ".imds-0", NetworkID: "net-z"}},
-	}
+	tracker.ipToContainerID["10.0.0.1"] = "gone-container"
 	tracker.mu.Unlock()
 
-	cli := &fakeDockerClient{inspectErr: errors.New("inspect error")}
-
-	// findContainerByIP continues past inspect errors and returns nil.
-	resp, err := findContainerByIP(context.Background(), cli, "10.0.0.1")
+	resp, err := findContainerByIP("10.0.0.1")
 	if err != nil {
-		t.Fatalf("want no error (function skips failed inspects), got %v", err)
+		t.Fatalf("want no error, got %v", err)
 	}
 	if resp != nil {
-		t.Errorf("want nil response when inspect fails, got %+v", resp)
+		t.Errorf("want nil response for stale index entry, got %+v", resp)
 	}
 }

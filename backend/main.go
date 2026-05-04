@@ -151,6 +151,8 @@ type ProxyLookupResponse struct {
 type NetworkInfo struct {
 	NetworkID   string `json:"networkId"`
 	NetworkName string `json:"networkName"`
+	IPAddress   string `json:"ipAddress,omitempty"`
+	IPv6Address string `json:"ipv6Address,omitempty"`
 }
 
 // AddressStatus is the per-container API representation of a single configured
@@ -197,7 +199,7 @@ var (
 	shutdownChan = make(chan struct{})
 )
 
-var findContainerByIPFn = findContainerByIP
+var findContainerByIPFn func(ip string) (*ProxyLookupResponse, error) = findContainerByIP
 
 // notifyProxyConfigUpdateFn is a variable so tests can replace it with a no-op
 // to avoid spawning background goroutines that race with test cleanup.
@@ -384,15 +386,12 @@ func updateIPIndex(containerID string) {
 	defer tracker.mu.Unlock()
 
 	ctr := tracker.byID[containerID]
-	for _, network := range ctr.Networks {
-		if network.NetworkName != "" {
-			if ns, ok := tracker.byID[containerID]; ok {
-				for _, net := range ns.Networks {
-					if net.NetworkName == network.NetworkName {
-						tracker.ipToContainerID[network.NetworkID] = containerID
-					}
-				}
-			}
+	for _, net := range ctr.Networks {
+		if net.IPAddress != "" {
+			tracker.ipToContainerID[net.IPAddress] = containerID
+		}
+		if net.IPv6Address != "" {
+			tracker.ipToContainerID[net.IPv6Address] = containerID
 		}
 	}
 }
@@ -401,11 +400,12 @@ func removeIPIndexForContainer(containerID string, containerInfo ContainerInfo) 
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
 
-	for _, network := range containerInfo.Networks {
-		if network.NetworkID != "" {
-			if tracker.ipToContainerID[network.NetworkID] == containerID {
-				delete(tracker.ipToContainerID, network.NetworkID)
-			}
+	for _, net := range containerInfo.Networks {
+		if net.IPAddress != "" && tracker.ipToContainerID[net.IPAddress] == containerID {
+			delete(tracker.ipToContainerID, net.IPAddress)
+		}
+		if net.IPv6Address != "" && tracker.ipToContainerID[net.IPv6Address] == containerID {
+			delete(tracker.ipToContainerID, net.IPv6Address)
 		}
 	}
 }
@@ -554,10 +554,7 @@ func handleContainerLookupByIP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-
-	response, err := findContainerByIPFn(ctx, dockerClient, request.IP)
+	response, err := findContainerByIPFn(request.IP)
 	if err != nil {
 		logger.Errorf("Failed to lookup container for IP %s: %v", request.IP, err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -579,43 +576,23 @@ func handleContainerLookupByIP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func findContainerByIP(ctx context.Context, cli DockerClient, ip string) (*ProxyLookupResponse, error) {
+func findContainerByIP(ip string) (*ProxyLookupResponse, error) {
 	tracker.mu.RLock()
 	defer tracker.mu.RUnlock()
 
-	for _, ctr := range tracker.byID {
-		for _, network := range ctr.Networks {
-			if network.NetworkName != "" {
-				ns, ok := tracker.byID[ctr.ContainerID]
-				if ok {
-					for _, net := range ns.Networks {
-						if net.NetworkName != "" {
-							inspect, err := cli.ContainerInspect(ctx, ctr.ContainerID)
-							if err != nil {
-								continue
-							}
-
-							if inspect.NetworkSettings == nil {
-								continue
-							}
-
-							if settings, ok := inspect.NetworkSettings.Networks[net.NetworkName]; ok {
-								if settings.IPAddress == ip || settings.GlobalIPv6Address == ip {
-									return &ProxyLookupResponse{
-										ContainerID: ctr.ContainerID,
-										Name:        ctr.Name,
-										Labels:      ctr.Labels,
-									}, nil
-								}
-							}
-						}
-					}
-				}
-			}
-		}
+	containerID, ok := tracker.ipToContainerID[ip]
+	if !ok {
+		return nil, nil
 	}
-
-	return nil, nil
+	ctr, ok := tracker.byID[containerID]
+	if !ok {
+		return nil, nil
+	}
+	return &ProxyLookupResponse{
+		ContainerID: ctr.ContainerID,
+		Name:        ctr.Name,
+		Labels:      ctr.Labels,
+	}, nil
 }
 
 func persistSettings() error {
@@ -803,6 +780,8 @@ func addContainerToTrackingWithNetwork(ctx context.Context, cli DockerClient, co
 		networks = append(networks, NetworkInfo{
 			NetworkID:   networkSettings.NetworkID,
 			NetworkName: networkName,
+			IPAddress:   networkSettings.IPAddress,
+			IPv6Address: networkSettings.GlobalIPv6Address,
 		})
 	}
 
@@ -852,6 +831,8 @@ func refreshContainerNetworks(ctx context.Context, cli DockerClient, containerID
 		networks = append(networks, NetworkInfo{
 			NetworkID:   networkSettings.NetworkID,
 			NetworkName: networkName,
+			IPAddress:   networkSettings.IPAddress,
+			IPv6Address: networkSettings.GlobalIPv6Address,
 		})
 	}
 

@@ -16,14 +16,13 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
 
-func withFindContainerByIP(t *testing.T, fn func(context.Context, DockerClient, string) (*ProxyLookupResponse, error)) {
+func withFindContainerByIP(t *testing.T, fn func(string) (*ProxyLookupResponse, error)) {
 	original := findContainerByIPFn
 	findContainerByIPFn = fn
 	t.Cleanup(func() { findContainerByIPFn = original })
@@ -74,7 +73,7 @@ func TestHandleContainerLookupByIPEmptyIP(t *testing.T) {
 }
 
 func TestHandleContainerLookupByIPNotFound(t *testing.T) {
-	withFindContainerByIP(t, func(ctx context.Context, _ DockerClient, _ string) (*ProxyLookupResponse, error) {
+	withFindContainerByIP(t, func(_ string) (*ProxyLookupResponse, error) {
 		return nil, nil
 	})
 
@@ -89,7 +88,7 @@ func TestHandleContainerLookupByIPNotFound(t *testing.T) {
 }
 
 func TestHandleContainerLookupByIPError(t *testing.T) {
-	withFindContainerByIP(t, func(ctx context.Context, _ DockerClient, _ string) (*ProxyLookupResponse, error) {
+	withFindContainerByIP(t, func(_ string) (*ProxyLookupResponse, error) {
 		return nil, errors.New("boom")
 	})
 
@@ -104,7 +103,7 @@ func TestHandleContainerLookupByIPError(t *testing.T) {
 }
 
 func TestHandleContainerLookupByIPSuccess(t *testing.T) {
-	withFindContainerByIP(t, func(ctx context.Context, _ DockerClient, ip string) (*ProxyLookupResponse, error) {
+	withFindContainerByIP(t, func(ip string) (*ProxyLookupResponse, error) {
 		return &ProxyLookupResponse{
 			ContainerID: "abc123",
 			Name:        "/my-container",
