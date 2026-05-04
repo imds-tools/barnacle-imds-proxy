@@ -65,7 +65,7 @@ Any IPv4 or IPv6 address you add in Settings is intercepted. These are the well-
 
 Two services run inside the Docker Desktop VM:
 
-- The **controller** watches Docker events and manages a Docker bridge network for each /24 (IPv4) or /64 (IPv6) subnet covering the addresses you configured. When a labeled container starts, it briefly pauses it, connects it to those networks, then unpauses it - ensuring the network is ready before the container's process starts.
+- The **controller** watches Docker events and creates one Docker bridge network per /24 (IPv4) or /64 (IPv6) subnet, named after the subnet (e.g. `.imds-169.254.169.0`). When a labeled container starts, it briefly pauses it, connects it to those networks, then unpauses it - ensuring the network is ready before the container's process starts.
 - The **proxy** binds to the configured IMDS addresses and forwards requests to your server, adding `X-Container-Id`, `X-Container-Name`, and container label headers so your server knows which container made the request.
 
 For the full technical description, see [docs/architecture.md](docs/architecture.md).

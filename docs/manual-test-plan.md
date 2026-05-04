@@ -74,7 +74,7 @@ docker run -d --rm --name test-imds-2 --label imds-proxy.enabled=true alpine sle
 
 | # | Action | Expected |
 |---|--------|----------|
-| 4.1 | Containers appear in the table | Row shows container name, truncated ID, and a collapse arrow |
+| 4.1 | Containers appear in the table | Row shows container name, truncated ID, per-IP address chips, and a collapse arrow |
 | 4.2 | | Item count at bottom-right updates |
 | 4.3 | Hover a row | Name copy icon and ID copy icon appear |
 | 4.4 | Click name copy icon | Snackbar "Copied container name to clipboard"; clipboard contains the name |
@@ -99,17 +99,26 @@ docker run -d --rm --name test-imds-2 --label imds-proxy.enabled=true alpine sle
 
 ---
 
-## 5. Network attachment
+## 5. Network connectivity chips
 
-Confirm a labeled container is attached to the IMDS networks the controller managed for the addresses configured in Settings:
+Requires the containers from section 4 and at least one IP configured in Settings (e.g. `169.254.169.254`).
+
+| # | Action | Expected |
+|---|--------|----------|
+| 5.1 | Observe the "Networks" column for a running labeled container | One chip per configured IP address |
+| 5.2 | | Connected addresses show a green outlined chip |
+| 5.3 | | Disconnected addresses show a grey outlined chip |
+| 5.4 | Hover a chip | Tooltip reads "Connected" or "Not connected" |
+| 5.5 | Stop the proxy container (`docker stop imds-proxy`) | Chips may turn grey (container still tracked but proxy not routing) |
+| 5.6 | Start the proxy again | Chips return to green after the next poll |
+
+To confirm network attachment via CLI:
 
 ```shell
 docker inspect test-imds-1 --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
 ```
 
-Expected output contains one `.imds-N` network per /24 IPv4 subnet and per /64 IPv6 subnet covering the configured IPs (typically `.imds-0` when only `169.254.169.254` is configured).
-
-> Per-container connectivity status (provider pills) is not currently rendered — see TODO.md "Container list UI redesign".
+Expected output contains one network per configured IP subnet: `.imds-169.254.169.0` for `169.254.169.254`, `.imds-fd00-ec2--` for `fd00:ec2::254`, etc.
 
 ---
 

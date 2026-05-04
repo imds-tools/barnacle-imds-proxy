@@ -46,7 +46,7 @@ If the configured URL uses `localhost`, the proxy rewrites it to `host.docker.in
 
 ## Networks
 
-Bridge networks are derived from the IP addresses configured in Settings. The controller groups configured IPs by /24 (IPv4) or /64 (IPv6) subnet and creates one bridge network per subnet pair (`.imds-0`, `.imds-1`, ...). Each network has the proxy attached at the configured IP, so any container connected to that network reaches the proxy when it hits the IMDS address.
+Bridge networks are derived from the IP addresses configured in Settings. The controller creates one bridge network per /24 (IPv4) or /64 (IPv6) subnet. Networks are named after their subnet — e.g. `.imds-169.254.169.0` for the `169.254.169.254` address. Each network has the proxy attached at the configured IP, so any container connected to that network reaches the proxy when it hits the IMDS address. Because names are derived from subnet content, adding or removing an IP never renames an existing network, which avoids brief connectivity interruptions for containers on unrelated subnets.
 
 The controller reconciles networks on backend startup and after every Settings save:
 
