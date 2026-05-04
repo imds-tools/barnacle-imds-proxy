@@ -40,9 +40,9 @@ func BenchmarkContainerTracking(b *testing.B) {
 			},
 		}
 
-		trackedContainersMutex.Lock()
-		trackedContainers[containerID] = containerInfo
-		trackedContainersMutex.Unlock()
+		tracker.mu.Lock()
+		tracker.byID[containerID] = containerInfo
+		tracker.mu.Unlock()
 
 		updateIPIndex(containerID)
 
@@ -70,9 +70,9 @@ func BenchmarkIPLookup(b *testing.B) {
 			},
 		}
 
-		trackedContainersMutex.Lock()
-		trackedContainers[containerID] = containerInfo
-		trackedContainersMutex.Unlock()
+		tracker.mu.Lock()
+		tracker.byID[containerID] = containerInfo
+		tracker.mu.Unlock()
 
 		updateIPIndex(containerID)
 	}
@@ -81,9 +81,9 @@ func BenchmarkIPLookup(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		ipAddr := fmt.Sprintf("169.254.169.%d", (i%100)%254+1)
 
-		ipToContainerIDMutex.RLock()
-		_ = ipToContainerID[ipAddr]
-		ipToContainerIDMutex.RUnlock()
+		tracker.mu.RLock()
+		_ = tracker.ipToContainerID[ipAddr]
+		tracker.mu.RUnlock()
 	}
 }
 
@@ -119,9 +119,9 @@ func BenchmarkConcurrentReads(b *testing.B) {
 			},
 		}
 
-		trackedContainersMutex.Lock()
-		trackedContainers[containerID] = containerInfo
-		trackedContainersMutex.Unlock()
+		tracker.mu.Lock()
+		tracker.byID[containerID] = containerInfo
+		tracker.mu.Unlock()
 
 		updateIPIndex(containerID)
 	}
@@ -132,9 +132,9 @@ func BenchmarkConcurrentReads(b *testing.B) {
 		for pb.Next() {
 			ipAddr := fmt.Sprintf("169.254.169.%d", (i%100)%254+1)
 
-			ipToContainerIDMutex.RLock()
-			_ = ipToContainerID[ipAddr]
-			ipToContainerIDMutex.RUnlock()
+			tracker.mu.RLock()
+			_ = tracker.ipToContainerID[ipAddr]
+			tracker.mu.RUnlock()
 
 			i++
 		}

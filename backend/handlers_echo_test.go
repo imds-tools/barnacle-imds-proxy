@@ -401,14 +401,14 @@ func TestGetContainersWithData(t *testing.T) {
 	t.Cleanup(resetTracking)
 	withDockerClient(t, &fakeDockerClient{})
 
-	trackedContainersMutex.Lock()
-	trackedContainers["abc"] = ContainerInfo{
+	tracker.mu.Lock()
+	tracker.byID["abc"] = ContainerInfo{
 		ContainerID: "abc",
 		Name:        "/test",
 		Labels:      map[string]string{},
 		Networks:    []NetworkInfo{{NetworkName: ".imds-0", NetworkID: "net1"}},
 	}
-	trackedContainersMutex.Unlock()
+	tracker.mu.Unlock()
 
 	settingsMutex.Lock()
 	settings.CustomIPs = []string{"169.254.169.254"}

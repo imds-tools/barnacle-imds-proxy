@@ -120,16 +120,11 @@ func (f *fakeDockerClient) Close() error {
 }
 
 func resetTracking() {
-	// Acquire locks in consistent order: ipToContainerIDMutex -> trackedContainersMutex
-	// This matches the order in updateIPIndex() and prevents deadlocks
-	ipToContainerIDMutex.Lock()
-	defer ipToContainerIDMutex.Unlock()
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
 
-	trackedContainersMutex.Lock()
-	defer trackedContainersMutex.Unlock()
-
-	ipToContainerID = make(map[string]string)
-	trackedContainers = make(map[string]ContainerInfo)
+	tracker.ipToContainerID = make(map[string]string)
+	tracker.byID = make(map[string]ContainerInfo)
 }
 
 func TestUpdateAndRemoveIPIndex(t *testing.T) {
@@ -137,33 +132,33 @@ func TestUpdateAndRemoveIPIndex(t *testing.T) {
 	defer resetTracking()
 
 	containerID := "abc123"
-	trackedContainersMutex.Lock()
-	trackedContainers[containerID] = ContainerInfo{
+	tracker.mu.Lock()
+	tracker.byID[containerID] = ContainerInfo{
 		ContainerID: containerID,
 		Networks: []NetworkInfo{{
 			NetworkID:   "net-1",
 			NetworkName: "imds",
 		}},
 	}
-	trackedContainersMutex.Unlock()
+	tracker.mu.Unlock()
 
 	updateIPIndex(containerID)
 
-	ipToContainerIDMutex.RLock()
-	if got := ipToContainerID["net-1"]; got != containerID {
-		ipToContainerIDMutex.RUnlock()
+	tracker.mu.RLock()
+	if got := tracker.ipToContainerID["net-1"]; got != containerID {
+		tracker.mu.RUnlock()
 		t.Fatalf("want ip index to be set, got %q", got)
 	}
-	ipToContainerIDMutex.RUnlock()
+	tracker.mu.RUnlock()
 
-	removeIPIndexForContainer(containerID, trackedContainers[containerID])
+	removeIPIndexForContainer(containerID, tracker.byID[containerID])
 
-	ipToContainerIDMutex.RLock()
-	if _, ok := ipToContainerID["net-1"]; ok {
-		ipToContainerIDMutex.RUnlock()
+	tracker.mu.RLock()
+	if _, ok := tracker.ipToContainerID["net-1"]; ok {
+		tracker.mu.RUnlock()
 		t.Fatalf("want ip index to be cleared")
 	}
-	ipToContainerIDMutex.RUnlock()
+	tracker.mu.RUnlock()
 }
 
 func TestAddAndRemoveContainerTracking(t *testing.T) {
@@ -224,9 +219,9 @@ func TestAddAndRemoveContainerTracking(t *testing.T) {
 		t.Fatalf("want two network connect calls, got %d", len(client.networkConnectCalls))
 	}
 
-	trackedContainersMutex.RLock()
-	info, ok := trackedContainers[containerID]
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	info, ok := tracker.byID[containerID]
+	tracker.mu.RUnlock()
 	if !ok {
 		t.Fatalf("want container to be tracked")
 	}
@@ -237,25 +232,25 @@ func TestAddAndRemoveContainerTracking(t *testing.T) {
 		t.Fatalf("want labels to be initialized")
 	}
 
-	ipToContainerIDMutex.RLock()
-	if got := ipToContainerID["net-aws"]; got != containerID {
-		ipToContainerIDMutex.RUnlock()
+	tracker.mu.RLock()
+	if got := tracker.ipToContainerID["net-aws"]; got != containerID {
+		tracker.mu.RUnlock()
 		t.Fatalf("want net-aws mapping, got %q", got)
 	}
-	if got := ipToContainerID["net-os"]; got != containerID {
-		ipToContainerIDMutex.RUnlock()
+	if got := tracker.ipToContainerID["net-os"]; got != containerID {
+		tracker.mu.RUnlock()
 		t.Fatalf("want net-os mapping, got %q", got)
 	}
-	ipToContainerIDMutex.RUnlock()
+	tracker.mu.RUnlock()
 
 	removeContainerFromTracking(containerID)
 
-	trackedContainersMutex.RLock()
-	if _, ok := trackedContainers[containerID]; ok {
-		trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	if _, ok := tracker.byID[containerID]; ok {
+		tracker.mu.RUnlock()
 		t.Fatalf("want container to be removed")
 	}
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RUnlock()
 }
 
 func TestAddContainerToTrackingWithNetworkPauseFirst(t *testing.T) {
@@ -343,17 +338,17 @@ func TestConcurrentContainerTracking(t *testing.T) {
 					},
 				}
 
-				trackedContainersMutex.Lock()
-				trackedContainers[containerID] = containerInfo
-				trackedContainersMutex.Unlock()
+				tracker.mu.Lock()
+				tracker.byID[containerID] = containerInfo
+				tracker.mu.Unlock()
 
 				// Update IP index
 				updateIPIndex(containerID)
 
 				// Lookup by IP
-				ipToContainerIDMutex.RLock()
-				got := ipToContainerID[ipAddr]
-				ipToContainerIDMutex.RUnlock()
+				tracker.mu.RLock()
+				got := tracker.ipToContainerID[ipAddr]
+				tracker.mu.RUnlock()
 				if got != containerID {
 					t.Errorf("want IP mapping %s=%s, got %s", ipAddr, containerID, got)
 				}
@@ -367,9 +362,9 @@ func TestConcurrentContainerTracking(t *testing.T) {
 	wg.Wait()
 
 	// Verify clean state
-	trackedContainersMutex.RLock()
-	numTracked := len(trackedContainers)
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	numTracked := len(tracker.byID)
+	tracker.mu.RUnlock()
 
 	if numTracked != 0 {
 		t.Errorf("want 0 tracked containers after cleanup, got %d", numTracked)
@@ -396,9 +391,9 @@ func TestConcurrentIPLookup(t *testing.T) {
 			},
 		}
 
-		trackedContainersMutex.Lock()
-		trackedContainers[containerID] = containerInfo
-		trackedContainersMutex.Unlock()
+		tracker.mu.Lock()
+		tracker.byID[containerID] = containerInfo
+		tracker.mu.Unlock()
 
 		updateIPIndex(containerID)
 	}
@@ -417,9 +412,9 @@ func TestConcurrentIPLookup(t *testing.T) {
 				ipAddr := fmt.Sprintf("169.254.169.%d", j%100%254+1)
 				expectedID := containers[ipAddr]
 
-				ipToContainerIDMutex.RLock()
-				got := ipToContainerID[ipAddr]
-				ipToContainerIDMutex.RUnlock()
+				tracker.mu.RLock()
+				got := tracker.ipToContainerID[ipAddr]
+				tracker.mu.RUnlock()
 
 				if got != expectedID {
 					t.Errorf("want IP mapping %s=%s, got %s", ipAddr, expectedID, got)
@@ -498,9 +493,9 @@ func TestRaceConditionInDockerEventProcessing(t *testing.T) {
 				},
 			}
 
-			trackedContainersMutex.Lock()
-			trackedContainers[containerID] = containerInfo
-			trackedContainersMutex.Unlock()
+			tracker.mu.Lock()
+			tracker.byID[containerID] = containerInfo
+			tracker.mu.Unlock()
 
 			// Simulate network connect
 			updateIPIndex(containerID)
@@ -513,13 +508,13 @@ func TestRaceConditionInDockerEventProcessing(t *testing.T) {
 	wg.Wait()
 
 	// Verify clean state
-	trackedContainersMutex.RLock()
-	numTracked := len(trackedContainers)
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	numTracked := len(tracker.byID)
+	tracker.mu.RUnlock()
 
-	ipToContainerIDMutex.RLock()
-	numIPs := len(ipToContainerID)
-	ipToContainerIDMutex.RUnlock()
+	tracker.mu.RLock()
+	numIPs := len(tracker.ipToContainerID)
+	tracker.mu.RUnlock()
 
 	if numTracked != 0 {
 		t.Errorf("want 0 tracked containers, got %d", numTracked)
@@ -542,16 +537,16 @@ func TestEdgeCaseEmptyContainerID(t *testing.T) {
 		},
 	}
 
-	trackedContainersMutex.Lock()
-	trackedContainers[""] = containerInfo
-	trackedContainersMutex.Unlock()
+	tracker.mu.Lock()
+	tracker.byID[""] = containerInfo
+	tracker.mu.Unlock()
 
 	updateIPIndex("")
 
 	// Should handle empty ID gracefully
-	ipToContainerIDMutex.RLock()
-	got := ipToContainerID["169.254.169.100"]
-	ipToContainerIDMutex.RUnlock()
+	tracker.mu.RLock()
+	got := tracker.ipToContainerID["169.254.169.100"]
+	tracker.mu.RUnlock()
 
 	if got != "" {
 		t.Errorf("want empty string mapping, got %q", got)
@@ -559,9 +554,9 @@ func TestEdgeCaseEmptyContainerID(t *testing.T) {
 
 	removeContainerFromTracking("")
 
-	trackedContainersMutex.RLock()
-	_, exists := trackedContainers[""]
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	_, exists := tracker.byID[""]
+	tracker.mu.RUnlock()
 
 	if exists {
 		t.Error("empty container ID should be removable")
@@ -597,16 +592,16 @@ func TestEdgeCaseUnicodeContainerName(t *testing.T) {
 				},
 			}
 
-			trackedContainersMutex.Lock()
-			trackedContainers[containerID] = containerInfo
-			trackedContainersMutex.Unlock()
+			tracker.mu.Lock()
+			tracker.byID[containerID] = containerInfo
+			tracker.mu.Unlock()
 
 			updateIPIndex(containerID)
 
 			// Verify container is tracked
-			trackedContainersMutex.RLock()
-			stored, exists := trackedContainers[containerID]
-			trackedContainersMutex.RUnlock()
+			tracker.mu.RLock()
+			stored, exists := tracker.byID[containerID]
+			tracker.mu.RUnlock()
 
 			if !exists {
 				t.Fatalf("container %q should be tracked", containerID)
@@ -616,9 +611,9 @@ func TestEdgeCaseUnicodeContainerName(t *testing.T) {
 			}
 
 			// Verify IP mapping
-			ipToContainerIDMutex.RLock()
-			got := ipToContainerID[ipAddr]
-			ipToContainerIDMutex.RUnlock()
+			tracker.mu.RLock()
+			got := tracker.ipToContainerID[ipAddr]
+			tracker.mu.RUnlock()
 
 			if got != containerID {
 				t.Errorf("want IP mapping to %q, got %q", containerID, got)
@@ -646,16 +641,16 @@ func TestEdgeCaseVeryLongContainerID(t *testing.T) {
 		},
 	}
 
-	trackedContainersMutex.Lock()
-	trackedContainers[longID] = containerInfo
-	trackedContainersMutex.Unlock()
+	tracker.mu.Lock()
+	tracker.byID[longID] = containerInfo
+	tracker.mu.Unlock()
 
 	updateIPIndex(longID)
 
 	// Verify storage works with long IDs
-	trackedContainersMutex.RLock()
-	stored, exists := trackedContainers[longID]
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	stored, exists := tracker.byID[longID]
+	tracker.mu.RUnlock()
 
 	if !exists {
 		t.Fatal("long container ID should be tracked")
@@ -665,9 +660,9 @@ func TestEdgeCaseVeryLongContainerID(t *testing.T) {
 	}
 
 	// Verify IP mapping
-	ipToContainerIDMutex.RLock()
-	got := ipToContainerID[ipAddr]
-	ipToContainerIDMutex.RUnlock()
+	tracker.mu.RLock()
+	got := tracker.ipToContainerID[ipAddr]
+	tracker.mu.RUnlock()
 
 	if got != longID {
 		t.Errorf("want IP mapping to long ID, got %q", got)
@@ -694,16 +689,16 @@ func TestEdgeCaseVeryLongContainerName(t *testing.T) {
 		},
 	}
 
-	trackedContainersMutex.Lock()
-	trackedContainers[containerID] = containerInfo
-	trackedContainersMutex.Unlock()
+	tracker.mu.Lock()
+	tracker.byID[containerID] = containerInfo
+	tracker.mu.Unlock()
 
 	updateIPIndex(containerID)
 
 	// Verify storage works with long names
-	trackedContainersMutex.RLock()
-	stored, exists := trackedContainers[containerID]
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	stored, exists := tracker.byID[containerID]
+	tracker.mu.RUnlock()
 
 	if !exists {
 		t.Fatal("container with long name should be tracked")
@@ -730,17 +725,17 @@ func TestEdgeCaseEmptyNetworkID(t *testing.T) {
 		},
 	}
 
-	trackedContainersMutex.Lock()
-	trackedContainers[containerID] = containerInfo
-	trackedContainersMutex.Unlock()
+	tracker.mu.Lock()
+	tracker.byID[containerID] = containerInfo
+	tracker.mu.Unlock()
 
 	updateIPIndex(containerID)
 
 	// Current behavior: creates mapping with empty key (edge case that doesn't crash)
 	// This documents existing behavior rather than enforcing validation
-	ipToContainerIDMutex.RLock()
-	_, exists := ipToContainerID[""]
-	ipToContainerIDMutex.RUnlock()
+	tracker.mu.RLock()
+	_, exists := tracker.ipToContainerID[""]
+	tracker.mu.RUnlock()
 
 	// System handles empty NetworkID without panic
 	if os.Getenv("VERBOSE_TESTS") != "" {
@@ -817,21 +812,21 @@ func TestStressHighConcurrentContainerOperations(t *testing.T) {
 				}
 
 				// Add container
-				trackedContainersMutex.Lock()
-				trackedContainers[containerID] = containerInfo
-				trackedContainersMutex.Unlock()
+				tracker.mu.Lock()
+				tracker.byID[containerID] = containerInfo
+				tracker.mu.Unlock()
 
 				// Update IP index
 				updateIPIndex(containerID)
 
 				// Read operations
-				ipToContainerIDMutex.RLock()
-				_ = ipToContainerID[ipAddr]
-				ipToContainerIDMutex.RUnlock()
+				tracker.mu.RLock()
+				_ = tracker.ipToContainerID[ipAddr]
+				tracker.mu.RUnlock()
 
-				trackedContainersMutex.RLock()
-				_ = trackedContainers[containerID]
-				trackedContainersMutex.RUnlock()
+				tracker.mu.RLock()
+				_ = tracker.byID[containerID]
+				tracker.mu.RUnlock()
 
 				// Delete container
 				if j%10 == 0 {
@@ -844,13 +839,13 @@ func TestStressHighConcurrentContainerOperations(t *testing.T) {
 	wg.Wait()
 
 	// Verify system is in consistent state
-	trackedContainersMutex.RLock()
-	numTracked := len(trackedContainers)
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	numTracked := len(tracker.byID)
+	tracker.mu.RUnlock()
 
-	ipToContainerIDMutex.RLock()
-	numIPs := len(ipToContainerID)
-	ipToContainerIDMutex.RUnlock()
+	tracker.mu.RLock()
+	numIPs := len(tracker.ipToContainerID)
+	tracker.mu.RUnlock()
 
 	t.Logf("After stress test: %d tracked containers, %d IP mappings", numTracked, numIPs)
 
@@ -890,14 +885,14 @@ func TestStressMutexContention(t *testing.T) {
 					return
 				default:
 					// Read from tracked containers
-					trackedContainersMutex.RLock()
-					_ = len(trackedContainers)
-					trackedContainersMutex.RUnlock()
+					tracker.mu.RLock()
+					_ = len(tracker.byID)
+					tracker.mu.RUnlock()
 
 					// Read from IP index
-					ipToContainerIDMutex.RLock()
-					_ = len(ipToContainerID)
-					ipToContainerIDMutex.RUnlock()
+					tracker.mu.RLock()
+					_ = len(tracker.ipToContainerID)
+					tracker.mu.RUnlock()
 
 					readCount++
 				}
@@ -930,9 +925,9 @@ func TestStressMutexContention(t *testing.T) {
 						},
 					}
 
-					trackedContainersMutex.Lock()
-					trackedContainers[containerID] = containerInfo
-					trackedContainersMutex.Unlock()
+					tracker.mu.Lock()
+					tracker.byID[containerID] = containerInfo
+					tracker.mu.Unlock()
 
 					updateIPIndex(containerID)
 
@@ -954,9 +949,9 @@ func TestStressMutexContention(t *testing.T) {
 	wg.Wait()
 
 	// Verify no corruption
-	trackedContainersMutex.RLock()
-	numTracked := len(trackedContainers)
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	numTracked := len(tracker.byID)
+	tracker.mu.RUnlock()
 
 	t.Logf("After contention test: %d containers remain tracked", numTracked)
 }
@@ -1030,9 +1025,9 @@ func TestScanExistingContainersEmpty(t *testing.T) {
 		t.Fatalf("want no error, got %v", err)
 	}
 
-	trackedContainersMutex.RLock()
-	n := len(trackedContainers)
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	n := len(tracker.byID)
+	tracker.mu.RUnlock()
 	if n != 0 {
 		t.Errorf("want 0 tracked containers, got %d", n)
 	}
@@ -1085,9 +1080,9 @@ func TestScanExistingContainersLabeledContainer(t *testing.T) {
 		t.Fatalf("want no error, got %v", err)
 	}
 
-	trackedContainersMutex.RLock()
-	_, ok := trackedContainers[containerID]
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	_, ok := tracker.byID[containerID]
+	tracker.mu.RUnlock()
 	if !ok {
 		t.Errorf("want container %s to be tracked", containerID)
 	}
@@ -1110,9 +1105,9 @@ func TestScanExistingContainersUnlabeledContainer(t *testing.T) {
 		t.Fatalf("want no error, got %v", err)
 	}
 
-	trackedContainersMutex.RLock()
-	n := len(trackedContainers)
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	n := len(tracker.byID)
+	tracker.mu.RUnlock()
 	if n != 0 {
 		t.Errorf("want 0 tracked containers for unlabeled container, got %d", n)
 	}
@@ -1200,14 +1195,14 @@ func TestRefreshContainerNetworksTracked(t *testing.T) {
 	t.Cleanup(resetTracking)
 
 	containerID := "refresh123"
-	trackedContainersMutex.Lock()
-	trackedContainers[containerID] = ContainerInfo{
+	tracker.mu.Lock()
+	tracker.byID[containerID] = ContainerInfo{
 		ContainerID: containerID,
 		Name:        "/refresh-test",
 		Labels:      map[string]string{},
 		Networks:    []NetworkInfo{},
 	}
-	trackedContainersMutex.Unlock()
+	tracker.mu.Unlock()
 
 	cli := &fakeDockerClient{
 		inspectSequence: []container.InspectResponse{
@@ -1231,9 +1226,9 @@ func TestRefreshContainerNetworksTracked(t *testing.T) {
 		t.Fatalf("want no error, got %v", err)
 	}
 
-	trackedContainersMutex.RLock()
-	info := trackedContainers[containerID]
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	info := tracker.byID[containerID]
+	tracker.mu.RUnlock()
 
 	if len(info.Networks) != 1 {
 		t.Fatalf("want 1 network after refresh, got %d", len(info.Networks))
@@ -1263,7 +1258,7 @@ func TestRefreshContainerNetworksUntracked(t *testing.T) {
 		},
 	}
 
-	// Container is not in trackedContainers - should return nil without panic.
+	// Container is not in tracker.byID - should return nil without panic.
 	if err := refreshContainerNetworks(context.Background(), cli, "untracked999"); err != nil {
 		t.Fatalf("want no error for untracked container, got %v", err)
 	}
@@ -1286,14 +1281,14 @@ func TestFindContainerByIPFound(t *testing.T) {
 	t.Cleanup(resetTracking)
 
 	containerID := "ipfound123"
-	trackedContainersMutex.Lock()
-	trackedContainers[containerID] = ContainerInfo{
+	tracker.mu.Lock()
+	tracker.byID[containerID] = ContainerInfo{
 		ContainerID: containerID,
 		Name:        "/ip-test",
 		Labels:      map[string]string{"app": "test"},
 		Networks:    []NetworkInfo{{NetworkName: ".imds-0", NetworkID: "net-x"}},
 	}
-	trackedContainersMutex.Unlock()
+	tracker.mu.Unlock()
 
 	cli := &fakeDockerClient{
 		inspectSequence: []container.InspectResponse{
@@ -1330,14 +1325,14 @@ func TestFindContainerByIPNotFound(t *testing.T) {
 	t.Cleanup(resetTracking)
 
 	containerID := "ipnotfound456"
-	trackedContainersMutex.Lock()
-	trackedContainers[containerID] = ContainerInfo{
+	tracker.mu.Lock()
+	tracker.byID[containerID] = ContainerInfo{
 		ContainerID: containerID,
 		Name:        "/no-ip",
 		Labels:      map[string]string{},
 		Networks:    []NetworkInfo{{NetworkName: ".imds-0", NetworkID: "net-y"}},
 	}
-	trackedContainersMutex.Unlock()
+	tracker.mu.Unlock()
 
 	cli := &fakeDockerClient{
 		inspectSequence: []container.InspectResponse{
@@ -1371,14 +1366,14 @@ func TestFindContainerByIPInspectError(t *testing.T) {
 	t.Cleanup(resetTracking)
 
 	containerID := "inspect-err-789"
-	trackedContainersMutex.Lock()
-	trackedContainers[containerID] = ContainerInfo{
+	tracker.mu.Lock()
+	tracker.byID[containerID] = ContainerInfo{
 		ContainerID: containerID,
 		Name:        "/err-container",
 		Labels:      map[string]string{},
 		Networks:    []NetworkInfo{{NetworkName: ".imds-0", NetworkID: "net-z"}},
 	}
-	trackedContainersMutex.Unlock()
+	tracker.mu.Unlock()
 
 	cli := &fakeDockerClient{inspectErr: errors.New("inspect error")}
 
