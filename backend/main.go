@@ -292,10 +292,9 @@ func main() {
 		logger.Warnf("Failed to load settings from disk: %v", err)
 	}
 
-	// Reconcile networks on startup so Docker state matches saved settings.
-	// Runs in background so startup is not blocked; also cleans up stale
-	// compose-managed networks left over from previous installs.
-	go func() {
+	// Reconcile networks before starting the HTTP server so the proxy is
+	// attached to all IMDS networks before the backend reports itself as ready.
+	{
 		settingsMutex.RLock()
 		netConfig := settings.NetworkConfig
 		settingsMutex.RUnlock()
@@ -304,7 +303,7 @@ func main() {
 		if err := reconcileNetworksFn(rctx, dockerClient, netConfig); err != nil {
 			logger.Warnf("Startup network reconciliation failed: %v", err)
 		}
-	}()
+	}
 
 	// Start monitoring Docker events
 	go monitorDockerEvents()
