@@ -173,17 +173,22 @@ type ContainersAPIResponse struct {
 	ProxyStatus ProxyContainerState `json:"proxyStatus"`
 }
 
+type containerTracker struct {
+	mu              sync.RWMutex
+	byID            map[string]ContainerInfo
+	ipToContainerID map[string]string
+}
+
+var tracker = &containerTracker{
+	byID:            make(map[string]ContainerInfo),
+	ipToContainerID: make(map[string]string),
+}
+
 var (
 	settings         Settings
 	settingsMutex    sync.RWMutex
 	settingsPath     = "/data/settings.json"
 	proxyComposePath = "/imds-proxy-compose.yaml"
-
-	trackedContainers      = make(map[string]ContainerInfo)
-	trackedContainersMutex sync.RWMutex
-
-	ipToContainerID      = make(map[string]string)
-	ipToContainerIDMutex sync.RWMutex
 
 	managedNetworks      []string
 	managedNetworksMutex sync.RWMutex
@@ -375,19 +380,16 @@ func getLocalIP() (string, error) {
 }
 
 func updateIPIndex(containerID string) {
-	ipToContainerIDMutex.Lock()
-	defer ipToContainerIDMutex.Unlock()
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
 
-	trackedContainersMutex.RLock()
-	defer trackedContainersMutex.RUnlock()
-
-	ctr := trackedContainers[containerID]
+	ctr := tracker.byID[containerID]
 	for _, network := range ctr.Networks {
 		if network.NetworkName != "" {
-			if ns, ok := trackedContainers[containerID]; ok {
+			if ns, ok := tracker.byID[containerID]; ok {
 				for _, net := range ns.Networks {
 					if net.NetworkName == network.NetworkName {
-						ipToContainerID[network.NetworkID] = containerID
+						tracker.ipToContainerID[network.NetworkID] = containerID
 					}
 				}
 			}
@@ -396,13 +398,13 @@ func updateIPIndex(containerID string) {
 }
 
 func removeIPIndexForContainer(containerID string, containerInfo ContainerInfo) {
-	ipToContainerIDMutex.Lock()
-	defer ipToContainerIDMutex.Unlock()
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
 
 	for _, network := range containerInfo.Networks {
 		if network.NetworkID != "" {
-			if ipToContainerID[network.NetworkID] == containerID {
-				delete(ipToContainerID, network.NetworkID)
+			if tracker.ipToContainerID[network.NetworkID] == containerID {
+				delete(tracker.ipToContainerID, network.NetworkID)
 			}
 		}
 	}
@@ -578,13 +580,13 @@ func handleContainerLookupByIP(w http.ResponseWriter, r *http.Request) {
 }
 
 func findContainerByIP(ctx context.Context, cli DockerClient, ip string) (*ProxyLookupResponse, error) {
-	trackedContainersMutex.RLock()
-	defer trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	defer tracker.mu.RUnlock()
 
-	for _, ctr := range trackedContainers {
+	for _, ctr := range tracker.byID {
 		for _, network := range ctr.Networks {
 			if network.NetworkName != "" {
-				ns, ok := trackedContainers[ctr.ContainerID]
+				ns, ok := tracker.byID[ctr.ContainerID]
 				if ok {
 					for _, net := range ns.Networks {
 						if net.NetworkName != "" {
@@ -697,9 +699,9 @@ func monitorDockerEvents() {
 				case "connect", "disconnect":
 					containerID := event.Actor.Attributes["container"]
 					if containerID != "" {
-						trackedContainersMutex.RLock()
-						_, tracked := trackedContainers[containerID]
-						trackedContainersMutex.RUnlock()
+						tracker.mu.RLock()
+						_, tracked := tracker.byID[containerID]
+						tracker.mu.RUnlock()
 						if tracked {
 							if err := refreshContainerNetworks(ctx, dockerClient, containerID); err != nil {
 								logger.Errorf("Failed to refresh networks for container %s: %v", shortID(containerID), err)
@@ -732,7 +734,7 @@ func scanExistingContainers(ctx context.Context, cli DockerClient) error {
 		}
 	}
 
-	logger.Infof("Scanned existing containers, found %d with imds-proxy.enabled=true", len(trackedContainers))
+	logger.Infof("Scanned existing containers, found %d with imds-proxy.enabled=true", len(tracker.byID))
 	return nil
 }
 
@@ -815,9 +817,9 @@ func addContainerToTrackingWithNetwork(ctx context.Context, cli DockerClient, co
 		containerInfo.Labels = make(map[string]string)
 	}
 
-	trackedContainersMutex.Lock()
-	trackedContainers[containerID] = containerInfo
-	trackedContainersMutex.Unlock()
+	tracker.mu.Lock()
+	tracker.byID[containerID] = containerInfo
+	tracker.mu.Unlock()
 
 	updateIPIndex(containerID)
 
@@ -826,12 +828,12 @@ func addContainerToTrackingWithNetwork(ctx context.Context, cli DockerClient, co
 }
 
 func removeContainerFromTracking(containerID string) {
-	trackedContainersMutex.Lock()
-	info, exists := trackedContainers[containerID]
+	tracker.mu.Lock()
+	info, exists := tracker.byID[containerID]
 	if exists {
-		delete(trackedContainers, containerID)
+		delete(tracker.byID, containerID)
 	}
-	trackedContainersMutex.Unlock()
+	tracker.mu.Unlock()
 
 	if exists {
 		removeIPIndexForContainer(containerID, info)
@@ -853,13 +855,13 @@ func refreshContainerNetworks(ctx context.Context, cli DockerClient, containerID
 		})
 	}
 
-	trackedContainersMutex.Lock()
-	info, exists := trackedContainers[containerID]
+	tracker.mu.Lock()
+	info, exists := tracker.byID[containerID]
 	if exists {
 		info.Networks = networks
-		trackedContainers[containerID] = info
+		tracker.byID[containerID] = info
 	}
-	trackedContainersMutex.Unlock()
+	tracker.mu.Unlock()
 
 	if exists {
 		updateIPIndex(containerID)
@@ -1034,12 +1036,12 @@ func reconcileNetworks(ctx context.Context, cli DockerClient, desired []NetworkC
 	}
 
 	// 5. Reconnect tracked containers to the new networks
-	trackedContainersMutex.RLock()
-	containerIDs := make([]string, 0, len(trackedContainers))
-	for id := range trackedContainers {
+	tracker.mu.RLock()
+	containerIDs := make([]string, 0, len(tracker.byID))
+	for id := range tracker.byID {
 		containerIDs = append(containerIDs, id)
 	}
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RUnlock()
 
 	for _, cid := range containerIDs {
 		for _, d := range desired {
@@ -1102,16 +1104,16 @@ func disconnectAllFromNetwork(ctx context.Context, cli DockerClient, networkName
 }
 
 func getContainers(ctx echo.Context) error {
-	trackedContainersMutex.RLock()
-	defer trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	defer tracker.mu.RUnlock()
 
 	settingsMutex.RLock()
 	netConfig := settings.NetworkConfig
 	customIPs := settings.CustomIPs
 	settingsMutex.RUnlock()
 
-	containerList := make([]ContainerInfo, 0, len(trackedContainers))
-	for _, info := range trackedContainers {
+	containerList := make([]ContainerInfo, 0, len(tracker.byID))
+	for _, info := range tracker.byID {
 		info.Addresses = buildAddressStatuses(info.Networks, netConfig, customIPs)
 		containerList = append(containerList, info)
 	}

@@ -163,9 +163,9 @@ func TestMonitorDockerEventsContainerCreate(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 
-	trackedContainersMutex.RLock()
-	_, tracked := trackedContainers[containerID]
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	_, tracked := tracker.byID[containerID]
+	tracker.mu.RUnlock()
 	if !tracked {
 		t.Errorf("want container %s tracked after create event", containerID)
 	}
@@ -192,9 +192,9 @@ func TestMonitorDockerEventsContainerCreateNoLabel(t *testing.T) {
 	}
 	time.Sleep(50 * time.Millisecond)
 
-	trackedContainersMutex.RLock()
-	_, tracked := trackedContainers[containerID]
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	_, tracked := tracker.byID[containerID]
+	tracker.mu.RUnlock()
 	if tracked {
 		t.Errorf("want unlabeled container %s NOT tracked", containerID)
 	}
@@ -205,9 +205,9 @@ func TestMonitorDockerEventsContainerDestroy(t *testing.T) {
 	t.Cleanup(resetTracking)
 
 	containerID := "monitor-destroy-abc"
-	trackedContainersMutex.Lock()
-	trackedContainers[containerID] = ContainerInfo{ContainerID: containerID, Name: "/to-destroy"}
-	trackedContainersMutex.Unlock()
+	tracker.mu.Lock()
+	tracker.byID[containerID] = ContainerInfo{ContainerID: containerID, Name: "/to-destroy"}
+	tracker.mu.Unlock()
 
 	cli := newMonitorDockerClient()
 	withDockerClient(t, cli)
@@ -222,9 +222,9 @@ func TestMonitorDockerEventsContainerDestroy(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 
-	trackedContainersMutex.RLock()
-	_, tracked := trackedContainers[containerID]
-	trackedContainersMutex.RUnlock()
+	tracker.mu.RLock()
+	_, tracked := tracker.byID[containerID]
+	tracker.mu.RUnlock()
 	if tracked {
 		t.Errorf("want container %s removed after destroy event", containerID)
 	}
@@ -235,9 +235,9 @@ func TestMonitorDockerEventsNetworkConnect(t *testing.T) {
 	t.Cleanup(resetTracking)
 
 	containerID := "monitor-net-abc"
-	trackedContainersMutex.Lock()
-	trackedContainers[containerID] = ContainerInfo{ContainerID: containerID, Name: "/net-test", Networks: []NetworkInfo{}}
-	trackedContainersMutex.Unlock()
+	tracker.mu.Lock()
+	tracker.byID[containerID] = ContainerInfo{ContainerID: containerID, Name: "/net-test", Networks: []NetworkInfo{}}
+	tracker.mu.Unlock()
 
 	cli := newMonitorDockerClient()
 	cli.fakeDockerClient.inspectSequence = []container.InspectResponse{
