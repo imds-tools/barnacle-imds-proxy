@@ -1156,20 +1156,22 @@ func notifyProxyConfigUpdate() {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/config-updated", nil)
 		if err != nil {
+			cancel()
 			logger.Errorf("Failed to create proxy notification request: %v", err)
 			return
 		}
 
 		resp, err := client.Do(req)
+		cancel()
+
 		if err != nil {
 			logger.Warnf("Attempt %d/%d: Failed to notify proxy of config update: %v", attempt+1, maxRetries, err)
 			continue
 		}
-		defer resp.Body.Close()
+		resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			logger.Warnf("Attempt %d/%d: Proxy notification returned status %d", attempt+1, maxRetries, resp.StatusCode)
@@ -1228,7 +1230,7 @@ func notifyProxyContainerDestroyed(containerID string) {
 			logger.Warnf("Attempt %d/%d: Failed to notify proxy of container destruction: %v", attempt+1, maxRetries, err)
 			continue
 		}
-		defer resp.Body.Close()
+		resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			logger.Warnf("Attempt %d/%d: Proxy container destroyed notification returned status %d", attempt+1, maxRetries, resp.StatusCode)
