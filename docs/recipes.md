@@ -49,7 +49,7 @@ while true; do
         Token:.SessionToken,Expiration:.Expiration}')
       printf "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${#BODY}\r\nConnection: close\r\n\r\n$BODY"
     fi
-  # nc handles one HTTP request per invocation; the loop restarts it for the next request
+  # nc handles one HTTP request per invocation; the outer loop restarts it for the next request
   } | nc -l -p $PORT -q 1
 done
 ```
@@ -109,12 +109,14 @@ zsh/bash:
 PORT=${1:-8080}
 while true; do
   {
+    # Read the HTTP request line and extract the resource query parameter from the URL
     read -r line
-    # Extract the resource query parameter from the request URL
     QUERY=$(echo "$line" | awk '{print $2}' | grep -o 'resource=[^&]*' | cut -d= -f2-)
     RESOURCE=${QUERY:-https://management.azure.com/}
 
+    # Read headers until the blank line that ends the HTTP header block
     while IFS= read -r h && [ "$h" != $'\r' ]; do
+      # ${h,,} lowercases the header name for case-insensitive matching
       [[ "${h,,}" == x-container-labels:* ]] && LABELS="${h#*: }"
     done
 
@@ -123,6 +125,7 @@ while true; do
     TOKEN=$(az account get-access-token --resource "$RESOURCE" ${CLIENT_ID:+--client-id "$CLIENT_ID"} --output json)
     BODY=$(echo "$TOKEN" | jq -c '{access_token:.accessToken,expires_in:3599,token_type:"Bearer"}')
     printf "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${#BODY}\r\nConnection: close\r\n\r\n$BODY"
+  # nc handles one HTTP request per invocation; the outer loop restarts it for the next request
   } | nc -l -p $PORT -q 1
 done
 ```
@@ -133,6 +136,7 @@ PowerShell:
 $port = 8080
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add("http://localhost:$port/")
+# host.docker.internal resolves to the host from inside a Docker container
 $listener.Prefixes.Add("http://host.docker.internal:$port/")
 $listener.Start()
 Write-Host "Azure IMDS server listening on port $port"
@@ -178,7 +182,9 @@ while true; do
     # Discard the request line; GCP token endpoint has no path-dependent behavior
     read -r _req
 
+    # Read headers until the blank line that ends the HTTP header block
     while IFS= read -r h && [ "$h" != $'\r' ]; do
+      # ${h,,} lowercases the header name for case-insensitive matching
       [[ "${h,,}" == x-container-labels:* ]] && LABELS="${h#*: }"
     done
 
@@ -189,6 +195,7 @@ while true; do
     EXPIRY=$(date -u -d "+3599 seconds" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v+3599S +"%Y-%m-%dT%H:%M:%SZ")
     BODY="{\"access_token\":\"$TOKEN\",\"expires_in\":3599,\"token_type\":\"Bearer\"}"
     printf "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${#BODY}\r\nConnection: close\r\n\r\n$BODY"
+  # nc handles one HTTP request per invocation; the outer loop restarts it for the next request
   } | nc -l -p $PORT -q 1
 done
 ```
@@ -199,6 +206,7 @@ PowerShell:
 $port = 8080
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add("http://localhost:$port/")
+# host.docker.internal resolves to the host from inside a Docker container
 $listener.Prefixes.Add("http://host.docker.internal:$port/")
 $listener.Start()
 Write-Host "GCP IMDS server listening on port $port"
@@ -241,9 +249,12 @@ zsh/bash:
 PORT=${1:-8080}
 while true; do
   {
+    # Discard the request line; credentials are returned for any path
     read -r _req
 
+    # Read headers until the blank line that ends the HTTP header block
     while IFS= read -r h && [ "$h" != $'\r' ]; do
+      # ${h,,} lowercases the header name for case-insensitive matching
       [[ "${h,,}" == x-container-labels:* ]] && LABELS="${h#*: }"
     done
 
@@ -252,6 +263,7 @@ while true; do
     BODY=$(echo "$CREDS" | jq -c '.Credentials | {Code:"Success",AccessKeyId:.AccessKeyId,
       AccessKeySecret:.AccessKeySecret,SecurityToken:.SecurityToken,Expiration:.Expiration}')
     printf "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${#BODY}\r\nConnection: close\r\n\r\n$BODY"
+  # nc handles one HTTP request per invocation; the outer loop restarts it for the next request
   } | nc -l -p $PORT -q 1
 done
 ```
@@ -262,6 +274,7 @@ PowerShell:
 $port = 8080
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add("http://localhost:$port/")
+# host.docker.internal resolves to the host from inside a Docker container
 $listener.Prefixes.Add("http://host.docker.internal:$port/")
 $listener.Start()
 Write-Host "Alibaba Cloud IMDS server listening on port $port"
@@ -305,9 +318,12 @@ zsh/bash:
 PORT=${1:-8080}
 while true; do
   {
+    # Discard the request line; credentials are returned for any path
     read -r _req
 
+    # Read headers until the blank line that ends the HTTP header block
     while IFS= read -r h && [ "$h" != $'\r' ]; do
+      # ${h,,} lowercases the header name for case-insensitive matching
       [[ "${h,,}" == x-container-labels:* ]] && LABELS="${h#*: }"
     done
 
@@ -317,6 +333,7 @@ while true; do
     BODY=$(echo "$CREDS" | jq -c '.Credentials | {Code:"Success",TmpSecretId:.TmpSecretId,
       TmpSecretKey:.TmpSecretKey,Token:.Token,ExpiredTime:(.ExpiredTime|tostring)}')
     printf "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${#BODY}\r\nConnection: close\r\n\r\n$BODY"
+  # nc handles one HTTP request per invocation; the outer loop restarts it for the next request
   } | nc -l -p $PORT -q 1
 done
 ```
@@ -327,6 +344,7 @@ PowerShell:
 $port = 8080
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add("http://localhost:$port/")
+# host.docker.internal resolves to the host from inside a Docker container
 $listener.Prefixes.Add("http://host.docker.internal:$port/")
 $listener.Start()
 Write-Host "Tencent Cloud IMDS server listening on port $port"
@@ -374,10 +392,13 @@ zsh/bash:
 PORT=${1:-8080}
 while true; do
   {
+    # Read the HTTP request line and extract path for provider routing
     read -r line
     PATH_REQ=$(echo "$line" | awk '{print $2}')
 
+    # Read headers until the blank line that ends the HTTP header block
     while IFS= read -r h && [ "$h" != $'\r' ]; do
+      # ${h,,} lowercases the header name for case-insensitive matching
       [[ "${h,,}" == x-container-labels:* ]] && LABELS="${h#*: }"
     done
 
@@ -400,12 +421,14 @@ while true; do
       QUERY=$(echo "$PATH_REQ" | grep -o 'resource=[^&]*' | cut -d= -f2-)
       RESOURCE=${QUERY:-https://management.azure.com/}
       CLIENT_ID=$(echo "$LABELS" | jq -r '.AZURE_CLIENT_ID // empty')
+      # ${CLIENT_ID:+--client-id "$CLIENT_ID"} expands to nothing if CLIENT_ID is unset
       TOKEN=$(az account get-access-token --resource "$RESOURCE" ${CLIENT_ID:+--client-id "$CLIENT_ID"} --output json)
       BODY=$(echo "$TOKEN" | jq -c '{access_token:.accessToken,expires_in:3599,token_type:"Bearer"}')
     else
       STATUS="404 Not Found"
     fi
     printf "HTTP/1.1 $STATUS\r\nContent-Type: $CTYPE\r\nContent-Length: ${#BODY}\r\nConnection: close\r\n\r\n$BODY"
+  # nc handles one HTTP request per invocation; the outer loop restarts it for the next request
   } | nc -l -p $PORT -q 1
 done
 ```
@@ -416,6 +439,7 @@ PowerShell:
 $port = 8080
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add("http://localhost:$port/")
+# host.docker.internal resolves to the host from inside a Docker container
 $listener.Prefixes.Add("http://host.docker.internal:$port/")
 $listener.Start()
 Write-Host "Multi-cloud IMDS server listening on port $port"
