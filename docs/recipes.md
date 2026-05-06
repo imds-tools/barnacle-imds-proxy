@@ -25,14 +25,21 @@ zsh/bash:
 #!/usr/bin/env bash
 PORT=${1:-8080}
 while true; do
-  { read -r line
+  {
+    # Read the HTTP request line (e.g. "GET /latest/meta-data/... HTTP/1.1")
+    read -r line
     PATH_REQ=$(echo "$line" | awk '{print $2}')
+
+    # Read headers until the blank line that ends the HTTP header block
     while IFS= read -r h && [ "$h" != $'\r' ]; do
+      # ${h,,} lowercases the header name for case-insensitive matching
       [[ "${h,,}" == x-container-labels:* ]] && LABELS="${h#*: }"
     done
+
     PROFILE=$(echo "$LABELS" | jq -r '.AWS_PROFILE // "default"')
     REGION=$(echo "$LABELS" | jq -r '.AWS_DEFAULT_REGION // empty')
     REGION=${REGION:-${AWS_DEFAULT_REGION:-us-east-1}}
+
     if [[ "$PATH_REQ" == */placement/region ]]; then
       printf "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${#REGION}\r\nConnection: close\r\n\r\n$REGION"
     else
@@ -42,6 +49,7 @@ while true; do
         Token:.SessionToken,Expiration:.Expiration}')
       printf "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${#BODY}\r\nConnection: close\r\n\r\n$BODY"
     fi
+  # nc handles one HTTP request per invocation; the outer loop restarts it for the next request
   } | nc -l -p $PORT -q 1
 done
 ```
@@ -52,6 +60,7 @@ PowerShell:
 $port = 8080
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add("http://localhost:$port/")
+# host.docker.internal resolves to the host from inside a Docker container
 $listener.Prefixes.Add("http://host.docker.internal:$port/")
 $listener.Start()
 Write-Host "AWS IMDS server listening on port $port"
@@ -99,16 +108,24 @@ zsh/bash:
 #!/usr/bin/env bash
 PORT=${1:-8080}
 while true; do
-  { read -r line
+  {
+    # Read the HTTP request line and extract the resource query parameter from the URL
+    read -r line
     QUERY=$(echo "$line" | awk '{print $2}' | grep -o 'resource=[^&]*' | cut -d= -f2-)
     RESOURCE=${QUERY:-https://management.azure.com/}
+
+    # Read headers until the blank line that ends the HTTP header block
     while IFS= read -r h && [ "$h" != $'\r' ]; do
+      # ${h,,} lowercases the header name for case-insensitive matching
       [[ "${h,,}" == x-container-labels:* ]] && LABELS="${h#*: }"
     done
+
     CLIENT_ID=$(echo "$LABELS" | jq -r '.AZURE_CLIENT_ID // empty')
+    # ${CLIENT_ID:+--client-id "$CLIENT_ID"} expands to nothing if CLIENT_ID is unset
     TOKEN=$(az account get-access-token --resource "$RESOURCE" ${CLIENT_ID:+--client-id "$CLIENT_ID"} --output json)
     BODY=$(echo "$TOKEN" | jq -c '{access_token:.accessToken,expires_in:3599,token_type:"Bearer"}')
     printf "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${#BODY}\r\nConnection: close\r\n\r\n$BODY"
+  # nc handles one HTTP request per invocation; the outer loop restarts it for the next request
   } | nc -l -p $PORT -q 1
 done
 ```
@@ -119,6 +136,7 @@ PowerShell:
 $port = 8080
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add("http://localhost:$port/")
+# host.docker.internal resolves to the host from inside a Docker container
 $listener.Prefixes.Add("http://host.docker.internal:$port/")
 $listener.Start()
 Write-Host "Azure IMDS server listening on port $port"
@@ -160,15 +178,24 @@ zsh/bash:
 #!/usr/bin/env bash
 PORT=${1:-8080}
 while true; do
-  { read -r _req
+  {
+    # Discard the request line; GCP token endpoint has no path-dependent behavior
+    read -r _req
+
+    # Read headers until the blank line that ends the HTTP header block
     while IFS= read -r h && [ "$h" != $'\r' ]; do
+      # ${h,,} lowercases the header name for case-insensitive matching
       [[ "${h,,}" == x-container-labels:* ]] && LABELS="${h#*: }"
     done
+
     SA=$(echo "$LABELS" | jq -r '.GCP_SERVICE_ACCOUNT // empty')
+    # ${SA:+--impersonate-service-account=$SA} expands to nothing if SA is unset
     TOKEN=$(gcloud auth print-access-token ${SA:+--impersonate-service-account=$SA})
+    # date -d is GNU (Linux); date -v is BSD (macOS) — try both
     EXPIRY=$(date -u -d "+3599 seconds" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v+3599S +"%Y-%m-%dT%H:%M:%SZ")
     BODY="{\"access_token\":\"$TOKEN\",\"expires_in\":3599,\"token_type\":\"Bearer\"}"
     printf "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${#BODY}\r\nConnection: close\r\n\r\n$BODY"
+  # nc handles one HTTP request per invocation; the outer loop restarts it for the next request
   } | nc -l -p $PORT -q 1
 done
 ```
@@ -179,6 +206,7 @@ PowerShell:
 $port = 8080
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add("http://localhost:$port/")
+# host.docker.internal resolves to the host from inside a Docker container
 $listener.Prefixes.Add("http://host.docker.internal:$port/")
 $listener.Start()
 Write-Host "GCP IMDS server listening on port $port"
@@ -220,15 +248,22 @@ zsh/bash:
 #!/usr/bin/env bash
 PORT=${1:-8080}
 while true; do
-  { read -r _req
+  {
+    # Discard the request line; credentials are returned for any path
+    read -r _req
+
+    # Read headers until the blank line that ends the HTTP header block
     while IFS= read -r h && [ "$h" != $'\r' ]; do
+      # ${h,,} lowercases the header name for case-insensitive matching
       [[ "${h,,}" == x-container-labels:* ]] && LABELS="${h#*: }"
     done
+
     ROLE_ARN=$(echo "$LABELS" | jq -r '.ALIBABA_ROLE_ARN // empty')
     CREDS=$(aliyun sts AssumeRole --RoleArn "$ROLE_ARN" --RoleSessionName barnacle-session --output json)
     BODY=$(echo "$CREDS" | jq -c '.Credentials | {Code:"Success",AccessKeyId:.AccessKeyId,
       AccessKeySecret:.AccessKeySecret,SecurityToken:.SecurityToken,Expiration:.Expiration}')
     printf "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${#BODY}\r\nConnection: close\r\n\r\n$BODY"
+  # nc handles one HTTP request per invocation; the outer loop restarts it for the next request
   } | nc -l -p $PORT -q 1
 done
 ```
@@ -239,6 +274,7 @@ PowerShell:
 $port = 8080
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add("http://localhost:$port/")
+# host.docker.internal resolves to the host from inside a Docker container
 $listener.Prefixes.Add("http://host.docker.internal:$port/")
 $listener.Start()
 Write-Host "Alibaba Cloud IMDS server listening on port $port"
@@ -281,15 +317,23 @@ zsh/bash:
 #!/usr/bin/env bash
 PORT=${1:-8080}
 while true; do
-  { read -r _req
+  {
+    # Discard the request line; credentials are returned for any path
+    read -r _req
+
+    # Read headers until the blank line that ends the HTTP header block
     while IFS= read -r h && [ "$h" != $'\r' ]; do
+      # ${h,,} lowercases the header name for case-insensitive matching
       [[ "${h,,}" == x-container-labels:* ]] && LABELS="${h#*: }"
     done
+
     ROLE=$(echo "$LABELS" | jq -r '.TENCENT_ROLE // empty')
+    # Look up the caller's UIN (account ID) to construct the full role ARN
     CREDS=$(tccli sts AssumeRole --RoleArn "qcs::cam::uin/$(tccli sts GetCallerIdentity --output json | jq -r '.UserId'):roleName/$ROLE" --RoleSessionName barnacle-session --output json)
     BODY=$(echo "$CREDS" | jq -c '.Credentials | {Code:"Success",TmpSecretId:.TmpSecretId,
       TmpSecretKey:.TmpSecretKey,Token:.Token,ExpiredTime:(.ExpiredTime|tostring)}')
     printf "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${#BODY}\r\nConnection: close\r\n\r\n$BODY"
+  # nc handles one HTTP request per invocation; the outer loop restarts it for the next request
   } | nc -l -p $PORT -q 1
 done
 ```
@@ -300,6 +344,7 @@ PowerShell:
 $port = 8080
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add("http://localhost:$port/")
+# host.docker.internal resolves to the host from inside a Docker container
 $listener.Prefixes.Add("http://host.docker.internal:$port/")
 $listener.Start()
 Write-Host "Tencent Cloud IMDS server listening on port $port"
@@ -307,6 +352,7 @@ while ($listener.IsListening) {
     $ctx    = $listener.GetContext()
     $labels = $ctx.Request.Headers["x-container-labels"] | ConvertFrom-Json -AsHashtable
     $role   = $labels?["TENCENT_ROLE"]
+    # Look up the caller's UIN to construct the full role ARN
     $uid    = tccli sts GetCallerIdentity --output json | ConvertFrom-Json | Select-Object -ExpandProperty UserId
     $arn    = "qcs::cam::uin/${uid}:roleName/$role"
     $creds  = tccli sts AssumeRole --RoleArn $arn --RoleSessionName barnacle-session --output json | ConvertFrom-Json
@@ -345,15 +391,22 @@ zsh/bash:
 #!/usr/bin/env bash
 PORT=${1:-8080}
 while true; do
-  { read -r line
+  {
+    # Read the HTTP request line and extract path for provider routing
+    read -r line
     PATH_REQ=$(echo "$line" | awk '{print $2}')
+
+    # Read headers until the blank line that ends the HTTP header block
     while IFS= read -r h && [ "$h" != $'\r' ]; do
+      # ${h,,} lowercases the header name for case-insensitive matching
       [[ "${h,,}" == x-container-labels:* ]] && LABELS="${h#*: }"
     done
+
     PROVIDER=$(echo "$LABELS" | jq -r '.CLOUD_PROVIDER // "aws"')
     CTYPE="application/json"
     STATUS="200 OK"
     BODY=""
+
     if [[ "$PATH_REQ" == */placement/region ]]; then
       REGION=$(echo "$LABELS" | jq -r '.AWS_DEFAULT_REGION // empty')
       BODY=${REGION:-${AWS_DEFAULT_REGION:-us-east-1}}
@@ -368,12 +421,14 @@ while true; do
       QUERY=$(echo "$PATH_REQ" | grep -o 'resource=[^&]*' | cut -d= -f2-)
       RESOURCE=${QUERY:-https://management.azure.com/}
       CLIENT_ID=$(echo "$LABELS" | jq -r '.AZURE_CLIENT_ID // empty')
+      # ${CLIENT_ID:+--client-id "$CLIENT_ID"} expands to nothing if CLIENT_ID is unset
       TOKEN=$(az account get-access-token --resource "$RESOURCE" ${CLIENT_ID:+--client-id "$CLIENT_ID"} --output json)
       BODY=$(echo "$TOKEN" | jq -c '{access_token:.accessToken,expires_in:3599,token_type:"Bearer"}')
     else
       STATUS="404 Not Found"
     fi
     printf "HTTP/1.1 $STATUS\r\nContent-Type: $CTYPE\r\nContent-Length: ${#BODY}\r\nConnection: close\r\n\r\n$BODY"
+  # nc handles one HTTP request per invocation; the outer loop restarts it for the next request
   } | nc -l -p $PORT -q 1
 done
 ```
@@ -384,6 +439,7 @@ PowerShell:
 $port = 8080
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add("http://localhost:$port/")
+# host.docker.internal resolves to the host from inside a Docker container
 $listener.Prefixes.Add("http://host.docker.internal:$port/")
 $listener.Start()
 Write-Host "Multi-cloud IMDS server listening on port $port"
