@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.0.0](https://github.com/imdsutil/barnacle-imds-proxy/compare/v0.8.1...v1.0.0) (2026-05-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* drive IMDS networks from user-configured IP list ([#42](https://github.com/imdsutil/barnacle-imds-proxy/issues/42))
+
+### Features
+
+* drive IMDS networks from user-configured IP list ([#42](https://github.com/imdsutil/barnacle-imds-proxy/issues/42)) ([f91849a](https://github.com/imdsutil/barnacle-imds-proxy/commit/f91849afdf1c5124b95c6e6a87c20ebc009dcb5c))
+* replace provider pills with per-IP network chips ([#49](https://github.com/imdsutil/barnacle-imds-proxy/issues/49)) ([f25e6c1](https://github.com/imdsutil/barnacle-imds-proxy/commit/f25e6c14fa753b390c6b14f29584d60686769e43))
+
+
+### Bug Fixes
+
+* **ci:** suppress unfixed docker/docker govulncheck vulns, add gomod Dependabot ([#45](https://github.com/imdsutil/barnacle-imds-proxy/issues/45)) ([30f2c2c](https://github.com/imdsutil/barnacle-imds-proxy/commit/30f2c2c3ce7eebf0a1592cb1aaa4c51e4676fe0c))
+* replace defer with explicit close/cancel in notify retry loops ([#57](https://github.com/imdsutil/barnacle-imds-proxy/issues/57)) ([ea912f9](https://github.com/imdsutil/barnacle-imds-proxy/commit/ea912f9b87a227d2c101e91d337bf83d1ae0c9af))
+* run startup network reconcile synchronously ([#51](https://github.com/imdsutil/barnacle-imds-proxy/issues/51)) ([5d662a3](https://github.com/imdsutil/barnacle-imds-proxy/commit/5d662a38ae3a8d8a4222f56d6a08dd59c96166fa))
+
+
+### Performance Improvements
+
+* O(1) container IP lookup via reverse IP index ([#53](https://github.com/imdsutil/barnacle-imds-proxy/issues/53)) ([63f6c17](https://github.com/imdsutil/barnacle-imds-proxy/commit/63f6c17452359d470a0e4064ba53cf6b3a62abe3))
+
 ## [0.8.1](https://github.com/imdsutil/barnacle-imds-proxy/compare/v0.8.0...v0.8.1) (2026-03-29)
 
 
